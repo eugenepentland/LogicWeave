@@ -1,0 +1,22 @@
+.{
+    .name = .mz_tools_regz,
+    .fingerprint = 0x7886602f9b3c8b94,
+    .version = "0.0.0",
+    .paths = .{
+        "README.md",
+        "build.zig",
+        "build.zig.zon",
+        "characterized",
+        "src",
+    },
+    .dependencies = .{
+        .libxml2 = .{
+            .url = "git+https://github.com/mattnite/zig-build-libxml2.git#ab99b56cc3709d2008ebc005b096d85d2a03b462",
+            .hash = "N-V-__8AAF9angBT74NozogdqB-2vLldsWLcNYJD2TW9xSyF",
+        },
+        .sqlite = .{
+            .url = "git+https://github.com/mattnite/zig-sqlite.git#4e554ab43095859e153a5652667fd8a4d697b223",
+            .hash = "sqlite-3.47.2-AAAAACdIpQC782FmpW8DylXC9FX3DNs91fjcoffHjlfZ",
+        },
+    },
+}

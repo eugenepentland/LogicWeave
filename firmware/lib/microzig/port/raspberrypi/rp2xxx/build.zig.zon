@@ -1,0 +1,24 @@
+.{
+    .name = .mz_port_raspberrypi_rp2xxx,
+    .fingerprint = 0xdf26650f89ed2bc0,
+    .version = "0.0.0",
+    .dependencies = .{
+        .@"microzig/build-internals" = .{ .path = "../../../build-internals" },
+        .@"microzig/modules/riscv32-common" = .{ .path = "../../../modules/riscv32-common" },
+        .@"pico-sdk" = .{
+            .url = "https://github.com/raspberrypi/pico-sdk/archive/refs/tags/2.1.1.tar.gz",
+            .hash = "N-V-__8AAPtGbwGQkp_3ej_icp5z6qgvjmwoE1AvAcZlh57Z",
+        },
+    },
+    .paths = .{
+        "README.md",
+        "build.zig.zon",
+        "build.zig",
+        "src",
+        "patches",
+        "tools",
+        "rp2040.ld",
+        "rp2350_arm.ld",
+        "rp2350_riscv.ld",
+    },
+}

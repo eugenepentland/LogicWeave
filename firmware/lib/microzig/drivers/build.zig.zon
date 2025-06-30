@@ -1,0 +1,17 @@
+.{
+    .name = .mz_drivers,
+    .fingerprint = 0x576453eedc5af46e,
+    .version = "0.0.1",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "framework.zig",
+        "base",
+        "display",
+        "input",
+        "io_expander",
+        "sensor",
+        "stepper",
+        "wireless",
+    },
+}

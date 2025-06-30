@@ -1,0 +1,13 @@
+__pycache__/
+.direnv/
+.DS_Store
+.gdbinit
+.lldbinit
+.venv
+.zig-cache/
+boxzer-out
+microzig-deploy/
+zig-cache/
+zig-out/
+
+*.regz

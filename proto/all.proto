@@ -1,0 +1,226 @@
+syntax = "proto3";
+
+package all;
+
+enum Mode {
+  input = 0;
+  output = 1;
+  pwm = 2;
+}
+
+enum BankVoltage {
+  V1P8 = 0;
+  V3P3 = 1;
+  V5P0 = 2;
+}
+
+message UsbBootloaderRequest {
+  uint32 val = 1;
+}
+
+message Empty {
+  uint32 status = 1;
+}
+
+message EchoMessage {
+  string message = 1;
+}
+
+message GetStatusRequest {}
+
+message GPIOReadRequest {
+  uint32 gpio_pin = 1;
+}
+
+message GPIOReadResponse {
+  bool state = 1;
+}
+
+message GPIOWriteRequest {
+  uint32 gpio_pin = 1;
+  bool state = 2;
+}
+
+message SPISetupRequest {
+  uint32 cs_pin = 1;
+  uint32 sclk_pin = 2;
+  uint32 mosi_pin = 3;
+  uint32 miso_pin = 4;
+  uint32 instance_num = 5;
+}
+
+message SPIWriteRequest {
+  uint32 instance_num = 1;
+  bytes data = 2;
+  uint32 cs_pin = 3;
+}
+
+message SoftSPIWriteRequest {
+  uint32 cs_pin = 1;
+  uint32 sclk_pin = 2;
+  uint32 mosi_pin = 3;
+  bytes data = 4;
+
+}
+
+message SPIReadRequest {
+  uint32 instance_num = 1;
+  bytes data = 2;
+  uint32 cs_pin = 3;
+  uint32 byte_count = 4;
+}
+
+message SPIReadResponse {
+  bytes data = 1;
+}
+
+message I2CSetupRequest {
+  uint32 sda_pin = 1;
+  uint32 scl_pin = 2;
+  uint32 instance_num = 3;
+}
+
+message I2CWriteRequest {
+  uint32 instance_num = 1;
+  bytes data = 2;
+  uint32 device_address = 3;
+}
+
+message I2CReadRequest {
+  uint32 instance_num = 1;
+  bytes data = 2;
+  uint32 device_address = 3;
+  uint32 byte_count = 4;
+}
+
+message I2CReadResponse {
+  bytes data = 1;
+}
+
+message GPIOModeRequest {
+  uint32 gpio_pin = 1;
+  Mode mode = 2;
+}
+
+message ErrorResponse {
+  string message = 1;
+}
+
+message UsbPDReadRequest {
+  uint32 channel = 1;
+}
+
+message UsbPDReadResponse {
+  uint32 measured_voltage_mv = 1;
+  uint32 measured_current_ma = 2;
+  uint32 requested_voltage_mv = 3;
+  uint32 requested_current_ma = 4;
+  bool on = 5;
+}
+
+message UsbPDReadPDORequest {
+  uint32 channel = 1;
+  uint32 index = 2;
+}
+
+message UsbPDReadTemperatureRequest {
+  uint32 channel = 1;
+}
+
+message UsbPDReadTemperatureResponse {
+  uint32 temperature_ch1_c = 1;
+  uint32 temperature_ch2_c = 2;
+}
+
+message WriteTextRequest {
+  string text = 1;
+  uint32 x = 2;
+  uint32 y = 3;
+}
+
+message UsbPDReadPDOResponse {
+  uint32 voltage_mv = 1;
+  uint32 current_ma = 2;
+  bool is_fixed = 3;
+  uint32 voltage_mv_min = 4;
+}
+
+message UsbPDEnableRequest {
+  uint32 channel = 1;
+  bool on = 2;
+}
+
+message ClearScreenRequest {}
+
+message RefreshScreenRequest {}
+
+message UsbPDWritePDORequest {
+  uint32 channel = 1;
+  uint32 voltage_mv = 3;
+  uint32 current_limit_ma = 4;
+}
+
+message FirmwareInfoRequest {
+  uint32 info = 1;
+}
+
+message FirmwareInfoResponse {
+  string hash = 1;
+  string version = 2;
+  string updated_at = 3;
+}
+
+message WriteBankVoltageRequest {
+  uint32 bank = 1;
+  BankVoltage voltage = 2;
+}
+
+message AppMessage {
+  oneof kind {
+    GPIOModeRequest gpio_mode_request = 1;
+    Empty emtpy = 2;
+    GPIOWriteRequest gpio_write_request = 3;
+    UsbBootloaderRequest usb_bootloader_request = 4;
+    Empty gpio_write_response = 5;
+    GPIOReadRequest gpio_read_request = 6;
+    GPIOReadResponse gpio_read_response = 7;
+    EchoMessage echo_message = 8;
+    Empty usb_bootloader_response = 9;
+    ErrorResponse error_response = 10;
+    I2CSetupRequest i2c_setup_request = 11;
+    Empty i2c_setup_response = 12;
+    I2CWriteRequest i2c_write_request = 13;
+    Empty i2c_write_response = 14;
+    I2CReadRequest i2c_read_request = 15;
+    I2CReadResponse i2c_read_response = 16;
+    SPISetupRequest spi_setup_request = 17;
+    Empty spi_setup_response = 18;
+    SPIReadRequest spi_read_request = 19;
+    SPIReadResponse spi_read_response = 20;
+    SPIWriteRequest spi_write_request = 21;
+    Empty spi_write_response = 22;
+    UsbPDReadRequest usb_pd_read_request = 23;
+    UsbPDReadResponse usb_pd_read_response = 24;
+    UsbPDReadPDORequest usb_pd_read_pdo_request = 25;
+    UsbPDReadPDOResponse usb_pd_read_pdo_response = 26;
+    UsbPDWritePDORequest usb_pd_write_pdo_request = 27;
+    WriteTextRequest write_text_request = 29;
+    Empty write_text_response = 30;
+    UsbPDEnableRequest usb_pd_enable_request = 31;
+    Empty usb_pd_enable_response = 32;
+    ClearScreenRequest clear_screen_request = 28;
+    Empty clear_screen_response = 34;
+    RefreshScreenRequest refresh_screen_request = 35;
+    FirmwareInfoRequest firmware_info_request = 36;
+    FirmwareInfoResponse firmware_info_response = 37;
+    Empty refresh_screen_response = 38;
+    Empty usb_pd_write_pdo_response = 39;
+    SoftSPIWriteRequest soft_spi_write_request = 40;
+    Empty soft_spi_write_response = 41;
+    Empty gpio_mode_response = 42;
+    WriteBankVoltageRequest write_bank_voltage_request = 43;
+    Empty write_bank_voltage_response = 44;
+    UsbPDReadTemperatureRequest usb_pd_read_temperature_request = 45;
+    UsbPDReadTemperatureResponse usb_pd_read_temperature_response = 46;
+  }
+}

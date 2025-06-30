@@ -1,0 +1,14 @@
+.{
+    .name = .mz_buildinternals,
+    .fingerprint = 0xc02420463a42482c,
+    .version = "0.0.0",
+    .dependencies = .{
+        .regz = .{ .path = "../tools/regz" },
+        .uf2 = .{ .path = "../tools/uf2" },
+        .@"esp-image" = .{ .path = "../tools/esp-image" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+    },
+}

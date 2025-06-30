@@ -1,0 +1,50 @@
+---
+.title = "Home",
+.date = @date("2020-07-06T00:00:00"),
+.author = "Matthew Knight",
+.draft = false,
+.layout = "index.shtml",
+.description = "MicroZig Homepage",
+.tags = []
+---
+
+_MicroZig is a toolbox for building embedded applications in Zig._
+
+
+[Get Started](/docs/getting-started)
+
+## Why Zig?
+
+Zig is an excellent programming language for embedded systems.
+
+- **Explicit allocators**: Zig's convention of passing an allocator interface to
+  functions that may allocate results in a single standard library that is
+  seamlessly used on freestanding targets.
+- **Cross-compilation**: Zig's powerful build system targets many embedded
+  architectures, MicroZig builds on top of this system to target specific
+  microcontrollers.
+- **C interop**: Directly include and link to C code with no FFI overhead.
+- **Strategic friction**: aspects of programming that are tricky need to be
+  explicit and even verbose at times. Nullable pointers, pointer casting,
+  integer conversions, etc.
+
+To learn more: [The Zig Language Reference](https://ziglang.org/documentation/0.14.0/)
+
+## Why MicroZig?
+
+- **Tooling**: MicroZig extends the Zig build system for Microcontrollers. This
+  includes:
+  - Generating memory-mapped IO bindings from register descriptions
+  - Generating a default linker script for your microcontroller (which you can
+    override).
+  - Giving you access to modules that provide high-level APIs for interacting
+    with your CPU.
+- **Low-cost Abstractions**: No abstraction is zero cost, but we've found the
+  right fit at different layers. For example, our MMIO interface feels
+  high-level, but every call results in a single read-modify-write to a
+  register.
+- **Bring your own hardware**: MicroZig is developed as a monorepo, but you can
+  switch out any layer and use the overall framework. Provide your own register
+  definitions for an uncontributed microcontroller, or build a custom PCB, yet
+  still use the MicroZig build system and extra components such as our generic
+  driver library.

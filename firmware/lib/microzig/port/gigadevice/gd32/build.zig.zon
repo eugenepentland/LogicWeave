@@ -1,0 +1,15 @@
+.{
+    .name = .mz_port_gigadevice_gd32,
+    .fingerprint = 0x36f4f6555bc5a1c6,
+    .version = "0.0.0",
+    .dependencies = .{
+        .@"microzig/build-internals" = .{ .path = "../../../build-internals" },
+    },
+    .paths = .{
+        "README.md",
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "test",
+    },
+}
