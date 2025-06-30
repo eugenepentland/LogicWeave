@@ -110,11 +110,16 @@ pub fn getGPIO(gpio_enum: u32) gpio.Pin {
 }
 
 pub fn getPPS(channel: u32) !*PPS {
-    return switch (channel) {
+    const pps = switch (channel) {
         1 => &pps1,
         2 => &pps2,
-        else => error.InvalidChannel,
+        else => return error.InvalidChannel,
     };
+    // Check to make sure its connected
+    _ = pps.getStatus() catch {
+        return error.PDNotConnected;
+    };
+    return pps;
 }
 
 pub fn set_bank_voltage(bank: u32, voltage: definitions.BankVoltage) !void {

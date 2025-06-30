@@ -345,7 +345,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 try usb_cdc_write_protobuf(.{ .write_bank_voltage_response = .{ .status = 200 } }, allocator);
             },
             else => {
-                try usb_cdc_write_protobuf(.{ .error_response = .{ .message = protobuf.ManagedString.managed("Error with message") } }, allocator);
+                return error.InvalidMessage;
             },
         }
     }
