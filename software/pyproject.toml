@@ -1,13 +1,13 @@
 [project]
 name = "logic-weave"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Python client library for communicating with the firmware device over serial."
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT License" } # Or { file = "LICENSE" } if you'll have a separate LICENSE file
 keywords = ["firmware", "serial", "protobuf", "device communication", "embedded"]
 authors = [
-  { name = "Your Name", email = "your.email@example.com" }, # <--- REPLACE WITH YOUR INFO
+  { name = "Eugene Pentland", email = "eugenepentland@gmail.com" }, # <--- REPLACE WITH YOUR INFO
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -26,12 +26,11 @@ classifiers = [
 dependencies = [
     "pyserial>=3.5", # Explicitly stated based on your code
     "protobuf>=4.21.0,<5", # Recommended range for protobuf, stick to v4
-    # Note: 'struct' and 'time' are built-in, no need to list them.
 ]
 
 [project.urls]
-Homepage = "https://github.com/eugenepentland/LogicWeave/tree/main/software" # <--- ADJUST THIS LINK
-Issues = "https://github.com/eugenepentland/LogicWeave/issues" # <--- ADJUST THIS LINK
+Homepage = "https://github.com/eugenepentland/LogicWeave/tree/main/software"
+Issues = "https://github.com/eugenepentland/LogicWeave/issues"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

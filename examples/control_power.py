@@ -1,4 +1,4 @@
-from LogicWeave.device import LogicWeave
+import LogicWeave
 
 with LogicWeave() as lw:
     # Print the firmware version
