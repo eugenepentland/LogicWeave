@@ -70,7 +70,7 @@ pub fn build(b: *Build) void {
         .optimize = optimize,
     });
     const protoc_step = protobuf.RunProtocStep.create(b, pb_host_dep.builder, host_target, .{
-        .destination_directory = b.path("src"),
+        .destination_directory = b.path("src/proto_gen"),
         .source_files = &.{"all.proto"}, // Change this
         .include_directories = &.{"../proto"}, // Change this
     });
@@ -90,7 +90,7 @@ pub fn build(b: *Build) void {
 
     // 3) Zig‐module for your generated .pb.zig files
     const proto_module = b.createModule(.{
-        .root_source_file = b.path("src/all.pb.zig"), // Ensure this points to a generated file
+        .root_source_file = b.path("src/proto_gen/all.pb.zig"), // Ensure this points to a generated file
     });
 
     // 4) Init MicroZig for RP2xxx (e.g. Pico)

@@ -195,20 +195,21 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
             },
             .spi_setup_request => |request| {
                 const mosi_pin = hardware.getGPIO(request.mosi_pin);
-                //const miso_pin = getGPIO(request.miso_pin);
+                const miso_pin = hardware.getGPIO(request.miso_pin);
                 const sclk_pin = hardware.getGPIO(request.sclk_pin);
+
                 const spi_instance = rp2xxx.spi.instance.num(@intCast(request.instance_num));
+                spi_instance.reset();
 
-                const cs_pin = hardware.getGPIO(request.cs_pin);
-                cs_pin.set_function(.sio);
-                cs_pin.set_direction(.out);
-                cs_pin.put(1);
+                const baud_rate: u32 = if (request.baud_rate > 0) request.baud_rate else 1_000_000;
+                const peri_freq = comptime rp2xxx.clock_config.peri.?.frequency();
+                try spi_instance.set_baudrate(baud_rate, peri_freq);
 
-                inline for (&.{ mosi_pin, sclk_pin }) |pin| {
+                inline for (&.{ mosi_pin, sclk_pin, miso_pin }) |pin| {
                     pin.set_function(.spi);
                 }
-
-                try spi_instance.apply(.{ .clock_config = rp2xxx.clock_config, .baud_rate = 2_000_000 });
+                try spi_instance.apply(.{ .clock_config = rp2xxx.clock_config });
+                time.sleep_us(100);
                 try usb_cdc_write_protobuf(.{ .spi_setup_response = .{ .status = 200 } }, allocator);
             },
             .soft_spi_write_request => |request| {
@@ -263,18 +264,38 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
 
                 try usb_cdc_write_protobuf(.{ .soft_spi_write_response = .{ .status = 200 } }, allocator);
             },
+            .spi_write_request => |request| {
+                const spi_instance = rp2xxx.spi.instance.num(@truncate(request.instance_num));
+
+                if (request.cs_pin != 0) {
+                    const cs_pin = hardware.getGPIO(request.cs_pin);
+                    cs_pin.set_function(.sio);
+                    cs_pin.set_direction(.out);
+                    cs_pin.put(0);
+                    spi_instance.write_blocking(u8, request.data.getSlice());
+                    cs_pin.put(1);
+                } else {
+                    spi_instance.write_blocking(u8, request.data.getSlice());
+                }
+
+                try usb_cdc_write_protobuf(.{ .spi_write_response = .{ .status = 200 } }, allocator);
+            },
             .spi_read_request => |request| {
                 var buff: []u8 = try allocator.alloc(u8, @truncate(request.byte_count));
+                const spi_instance = rp2xxx.spi.instance.num(@truncate(request.instance_num));
                 defer allocator.free(buff);
 
-                const cs_pin = hardware.getGPIO(request.cs_pin);
-                cs_pin.set_function(.sio);
-                cs_pin.set_direction(.out);
-                cs_pin.put(0);
-                defer cs_pin.put(1);
+                if (request.cs_pin != 0) {
+                    const cs_pin = hardware.getGPIO(request.cs_pin);
+                    cs_pin.set_function(.sio);
+                    cs_pin.set_direction(.out);
+                    cs_pin.put(0);
+                    spi_instance.read_blocking(u8, @truncate(request.data), buff[0..]);
+                    cs_pin.put(1);
+                } else {
+                    spi_instance.read_blocking(u8, @truncate(request.data), buff[0..]);
+                }
 
-                const spi_instance = rp2xxx.spi.instance.num(@truncate(request.instance_num));
-                spi_instance.transceive_blocking(u8, request.data.getSlice(), buff[0..]);
                 const resp: definitions.AppMessage.kind_union = .{ .spi_read_response = .{ .data = protobuf.ManagedString.managed(buff[0..]) } };
                 try usb_cdc_write_protobuf(resp, allocator);
             },

@@ -92,18 +92,18 @@ pub const GPIOWriteRequest = struct {
 };
 
 pub const SPISetupRequest = struct {
-    cs_pin: u32 = 0,
     sclk_pin: u32 = 0,
     mosi_pin: u32 = 0,
     miso_pin: u32 = 0,
     instance_num: u32 = 0,
+    baud_rate: u32 = 0,
 
     pub const _desc_table = .{
-        .cs_pin = fd(1, .{ .Varint = .Simple }),
         .sclk_pin = fd(2, .{ .Varint = .Simple }),
         .mosi_pin = fd(3, .{ .Varint = .Simple }),
         .miso_pin = fd(4, .{ .Varint = .Simple }),
         .instance_num = fd(5, .{ .Varint = .Simple }),
+        .baud_rate = fd(6, .{ .Varint = .Simple }),
     };
 
     pub usingnamespace protobuf.MessageMixins(@This());
@@ -141,13 +141,13 @@ pub const SoftSPIWriteRequest = struct {
 
 pub const SPIReadRequest = struct {
     instance_num: u32 = 0,
-    data: ManagedString = .Empty,
+    data: u32 = 0,
     cs_pin: u32 = 0,
     byte_count: u32 = 0,
 
     pub const _desc_table = .{
         .instance_num = fd(1, .{ .Varint = .Simple }),
-        .data = fd(2, .Bytes),
+        .data = fd(2, .{ .Varint = .Simple }),
         .cs_pin = fd(3, .{ .Varint = .Simple }),
         .byte_count = fd(4, .{ .Varint = .Simple }),
     };

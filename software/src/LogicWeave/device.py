@@ -383,21 +383,21 @@ class LogicWeave:
 
     # --- SPI Methods ---
 
-    def write_spi_setup(self, instance_num: int, cs_pin: int, sclk_pin: int, mosi_pin: int, miso_pin: int):
+    def write_spi_setup(self, instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int, baud_rate: int):
         """
         Writes the configuration for an SPI peripheral instance on the device.
         In 'file' mode, logs the request.
         """
         request = all_pb2.SPISetupRequest(
             instance_num=instance_num,
-            cs_pin=cs_pin,
             sclk_pin=sclk_pin,
             mosi_pin=mosi_pin,
-            miso_pin=miso_pin
+            miso_pin=miso_pin,
+            baud_rate=baud_rate
         )
         self._send_and_parse(request, "spi_setup_response")
 
-    def spi_write(self, instance_num: int, data: bytes, cs_pin: int):
+    def spi_write(self, instance_num: int, data: bytes, cs_pin: int = 0):
         """
         Writes data over an SPI interface.
         In 'file' mode, logs the request.
@@ -422,14 +422,14 @@ class LogicWeave:
         )
         self._send_and_parse(request, "soft_spi_write_response")
 
-    def spi_read(self, instance_num: int, byte_count: int, cs_pin: int) -> bytes:
+    def spi_read(self, instance_num: int, data: int, byte_count: int, cs_pin: int = 0) -> bytes:
         """
         Reads data over an SPI interface.
         In 'file' mode, logs the request and returns an empty bytes object.
         """
         request = all_pb2.SPIReadRequest(
             instance_num=instance_num,
-            data=b'', # Data field typically not used for outgoing in a pure read
+            data=data, # Data field typically not used for outgoing in a pure read
             cs_pin=cs_pin,
             byte_count=byte_count
         )

@@ -400,7 +400,7 @@ pub const SPI = enum(u1) {
         }
     }
 
-    fn set_baudrate(spi: SPI, baudrate: u32, freq_in: u32) ConfigError!void {
+    pub fn set_baudrate(spi: SPI, baudrate: u32, freq_in: u32) ConfigError!void {
         const spi_regs = spi.get_regs();
 
         // Clock constraints per the datasheet

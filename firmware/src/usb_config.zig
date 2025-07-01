@@ -33,10 +33,10 @@ pub var DEVICE_CONFIGURATION: usb.DeviceConfiguration = .{
     .config_descriptor = &usb_config_descriptor,
     .lang_descriptor = "\x04\x03\x09\x04",
     .descriptor_strings = &.{
-        &usb.utils.utf8ToUtf16Le("Raspberry Pi"),
-        &usb.utils.utf8ToUtf16Le("Pico Test Device"),
+        &usb.utils.utf8ToUtf16Le("LogicWeave"),
+        &usb.utils.utf8ToUtf16Le("Programmer"),
         &usb.utils.utf8ToUtf16Le("someserial"),
-        &usb.utils.utf8ToUtf16Le("Board CDC"),
+        &usb.utils.utf8ToUtf16Le("CDC"),
     },
     .drivers = &drivers,
 };

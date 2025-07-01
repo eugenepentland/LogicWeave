@@ -42,11 +42,11 @@ message GPIOWriteRequest {
 }
 
 message SPISetupRequest {
-  uint32 cs_pin = 1;
   uint32 sclk_pin = 2;
   uint32 mosi_pin = 3;
   uint32 miso_pin = 4;
   uint32 instance_num = 5;
+  uint32 baud_rate = 6;
 }
 
 message SPIWriteRequest {
@@ -65,7 +65,7 @@ message SoftSPIWriteRequest {
 
 message SPIReadRequest {
   uint32 instance_num = 1;
-  bytes data = 2;
+  uint32 data = 2;
   uint32 cs_pin = 3;
   uint32 byte_count = 4;
 }
