@@ -3,3 +3,5 @@ zig-out/
 *.o
 __pycache__
 *.egg-info
+dist/
+venv

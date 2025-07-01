@@ -127,16 +127,16 @@ pub fn set_bank_voltage(bank: u32, voltage: definitions.BankVoltage) !void {
     var gpio_in2: gpio.Pin = undefined;
     switch (bank) {
         1 => {
-            gpio_in1 = rp2xxx.gpio.num(15);
-            gpio_in2 = rp2xxx.gpio.num(14);
-        },
-        2 => {
             gpio_in1 = rp2xxx.gpio.num(19);
             gpio_in2 = rp2xxx.gpio.num(20);
         },
-        3 => {
+        2 => {
             gpio_in1 = rp2xxx.gpio.num(21);
             gpio_in2 = rp2xxx.gpio.num(22);
+        },
+        3 => {
+            gpio_in1 = rp2xxx.gpio.num(15);
+            gpio_in2 = rp2xxx.gpio.num(14);
         },
         else => return error.InvalidIOBank,
     }
