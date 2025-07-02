@@ -3,7 +3,211 @@ import time
 import struct # Required for packing/unpacking length prefixes
 import LogicWeave.proto_gen.all_pb2 as all_pb2 # Changed import to the standard protobuf generated file
 from LogicWeave.exceptions import DeviceFirmwareError, DeviceResponseError, DeviceConnectionError
+from .definitions import GPIOMode, BankVoltage
 import serial.tools.list_ports
+
+class GPIO:
+    """Represents a single GPIO pin on the device."""
+    def __init__(self, controller: 'LogicWeave', pin: int):
+        """
+        Initializes a GPIO object. Users should get this from LogicWeave.gpio().
+
+        Args:
+            controller (LogicWeave): The main device controller instance.
+            pin (int): The GPIO pin number this object will control.
+        """
+        self._controller = controller
+        self.pin = pin
+        self.mode = None
+
+    def set_mode(self, mode: all_pb2.Mode):
+        """
+        Sets the mode (input, output, etc.) for this GPIO pin.
+
+        Args:
+            mode (all_pb2.Mode): The desired mode from the protobuf enum.
+        """
+        request = all_pb2.GPIOModeRequest(gpio_pin=self.pin, mode=mode)
+        self._controller._send_and_parse(request, "gpio_mode_response")
+        self.mode = mode
+
+    def write(self, state: bool):
+        """Writes a boolean state (True for HIGH, False for LOW) to this pin."""
+        if self.mode != GPIOMode.OUTPUT:
+            self.set_mode(GPIOMode.OUTPUT)
+
+        request = all_pb2.GPIOWriteRequest(gpio_pin=self.pin, state=state)
+        self._controller._send_and_parse(request, "gpio_write_response")
+
+    def read(self) -> bool:
+        """Reads the state of this pin. Returns True for HIGH, False for LOW."""
+        if self.mode != GPIOMode.INPUT:
+            self.set_mode(GPIOMode.INPUT)
+
+        request = all_pb2.GPIOReadRequest(gpio_pin=self.pin)
+        response = self._controller._send_and_parse(request, "gpio_read_response")
+        return response.state if self._controller.mode == "serial" else False
+
+    def __repr__(self):
+        return f"<GPIO pin={self.pin}>"
+
+
+class I2C:
+    """Represents a configured I2C peripheral instance."""
+    def __init__(self, controller: 'LogicWeave', instance_num: int, sda_pin: int, scl_pin: int):
+        """
+        Initializes and configures an I2C bus. Users should get this from LogicWeave.i2c().
+
+        Args:
+            controller (LogicWeave): The main device controller instance.
+            instance_num (int): The hardware instance number assigned by the controller.
+            sda_pin (int): The pin to use for I2C SDA.
+            scl_pin (int): The pin to use for I2C SCL.
+        """
+        self._controller = controller
+        self._instance_num = instance_num
+        self.sda_pin = sda_pin
+        self.scl_pin = scl_pin
+        
+        # Automatically configure the peripheral on the device upon creation
+        self._setup()
+
+    def _setup(self):
+        """Sends the I2C setup command to the device."""
+        request = all_pb2.I2CSetupRequest(
+            instance_num=self._instance_num,
+            sda_pin=self.sda_pin,
+            scl_pin=self.scl_pin
+        )
+        self._controller._send_and_parse(request, "i2c_setup_response")
+
+    def write(self, device_address: int, data: bytes):
+        """Writes data to a specific device on this I2C bus."""
+        request = all_pb2.I2CWriteRequest(
+            instance_num=self._instance_num,
+            device_address=device_address,
+            data=data
+        )
+        self._controller._send_and_parse(request, "i2c_write_response")
+
+    def read(self, device_address: int, byte_count: int) -> bytes:
+        """Reads a number of bytes from a specific device on this I2C bus."""
+        request = all_pb2.I2CReadRequest(
+            instance_num=self._instance_num,
+            device_address=device_address,
+            byte_count=byte_count
+        )
+        response = self._controller._send_and_parse(request, "i2c_read_response")
+        return response.data if self._controller.mode == "serial" else b""
+
+    def __repr__(self):
+        return f"<I2C instance={self._instance_num} sda={self.sda_pin} scl={self.scl_pin}>"
+
+class SPI:
+    """Represents a configured SPI peripheral instance."""
+    def __init__(self, controller: 'LogicWeave', instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int, baud_rate: int, default_cs_pin: int | None = None):
+        """
+        Initializes and configures an SPI bus. Users should get this from LogicWeave.spi().
+
+        Args:
+            controller (LogicWeave): The main device controller instance.
+            instance_num (int): The hardware instance number to use.
+            sclk_pin (int): The pin for SPI Clock.
+            mosi_pin (int): The pin for Master Out Slave In.
+            miso_pin (int): The pin for Master In Slave Out.
+            baud_rate (int): The communication speed in Hz.
+            default_cs_pin (int, optional): Default Chip Select pin to use for transactions.
+                                            Can be overridden in read/write calls. Defaults to None.
+        """
+        self._controller = controller
+        self._instance_num = instance_num
+        self.sclk_pin = sclk_pin
+        self.mosi_pin = mosi_pin
+        self.miso_pin = miso_pin
+        self.baud_rate = baud_rate
+        self._default_cs_pin = default_cs_pin
+
+        # Automatically configure the peripheral on the device upon creation
+        self._setup()
+
+    def _setup(self):
+        """Sends the SPI setup command to the device."""
+        request = all_pb2.SPISetupRequest(
+            instance_num=self._instance_num,
+            sclk_pin=self.sclk_pin,
+            mosi_pin=self.mosi_pin,
+            miso_pin=self.miso_pin,
+            baud_rate=self.baud_rate
+        )
+        self._controller._send_and_parse(request, "spi_setup_response")
+
+    def write(self, data: bytes, cs_pin: int | None = None):
+        """
+        Writes data over this SPI interface.
+
+        Uses the default CS pin if one was set during initialization,
+        unless a specific cs_pin is provided here.
+
+        Args:
+            data (bytes): The data to write.
+            cs_pin (int, optional): The CS pin to use for this transaction, overriding the default.
+
+        Raises:
+            ValueError: If no CS pin is provided here and no default was set.
+        """
+        active_cs_pin = cs_pin if cs_pin is not None else self._default_cs_pin
+        if active_cs_pin is None:
+            active_cs_pin=0
+
+        request = all_pb2.SPIWriteRequest(
+            instance_num=self._instance_num,
+            data=data,
+            cs_pin=active_cs_pin
+        )
+        self._controller._send_and_parse(request, "spi_write_response")
+
+    def read(self, byte_count: int, cs_pin: int | None = None, data_to_send: int = 0) -> bytes:
+        """
+        Reads data from this SPI interface.
+
+        Uses the default CS pin if one was set during initialization,
+        unless a specific cs_pin is provided here.
+
+        Args:
+            byte_count (int): The number of bytes to read.
+            cs_pin (int, optional): The CS pin to use for this transaction, overriding the default.
+            data_to_send (int, optional): Dummy data to send to generate clock pulses. Defaults to 0.
+
+        Returns:
+            bytes: The data read from the device.
+
+        Raises:
+            ValueError: If no CS pin is provided here and no default was set.
+        """
+        active_cs_pin = cs_pin if cs_pin is not None else self._default_cs_pin
+        if active_cs_pin is None:
+            active_cs_pin = 0
+            #raise ValueError("A Chip Select (CS) pin must be provided either during initialization or in the method call.")
+
+        request = all_pb2.SPIReadRequest(
+            instance_num=self._instance_num,
+            data=data_to_send,
+            cs_pin=active_cs_pin,
+            byte_count=byte_count
+        )
+        response = self._controller._send_and_parse(request, "spi_read_response")
+        return response.data if self._controller.mode == "serial" else b""
+
+    def __repr__(self):
+        parts = [
+            f"<SPI instance={self._instance_num}",
+            f"sclk={self.sclk_pin}",
+            f"mosi={self.mosi_pin}",
+            f"miso={self.miso_pin}"
+        ]
+        if self._default_cs_pin is not None:
+            parts.append(f"default_cs={self._default_cs_pin}")
+        return " ".join(parts) + ">"
 
 def _get_device_port():
     vid = 0x1E8B
@@ -127,6 +331,43 @@ class LogicWeave:
             "write_bank_voltage_response": all_pb2.Empty,
             "error_response": all_pb2.ErrorResponse, # For device-side error messages
         }
+
+    def gpio(self, pin: int) -> GPIO:
+        """
+        Gets a GPIO object to control a single pin. This method is unchanged.
+        """
+        return GPIO(self, pin)
+
+    def i2c(self, instance_num: int, sda_pin: int, scl_pin: int) -> I2C:
+        """
+        Initializes an I2C bus on the specified pins for a given hardware instance.
+
+        Args:
+            instance_num (int): The hardware instance number to use (e.g., 0 for I2C0).
+            sda_pin (int): The pin to use for I2C SDA.
+            scl_pin (int): The pin to use for I2C SCL.
+
+        Returns:
+            I2C: An object for interacting with this I2C bus.
+        """
+        return I2C(self, instance_num, sda_pin, scl_pin)
+
+    def spi(self, instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int, baud_rate: int = 1000000, default_cs_pin: int | None = None) -> SPI:
+        """
+        Initializes an SPI bus on the specified pins for a given hardware instance.
+
+        Args:
+            instance_num (int): The hardware instance number to use (e.g., 1 for SPI1).
+            sclk_pin (int): The pin for SPI Clock.
+            mosi_pin (int): The pin for Master Out Slave In.
+            miso_pin (int): The pin for Master In Slave Out.
+            baud_rate (int): The communication speed in Hz. Defaults to 1 MHz.
+            default_cs_pin (int, optional): Sets a default Chip Select pin for the SPI object.
+
+        Returns:
+            SPI: An object for interacting with this SPI bus.
+        """
+        return SPI(self, instance_num, sclk_pin, mosi_pin, miso_pin, baud_rate, default_cs_pin)
 
     def _execute_transaction(self, specific_message_payload) -> all_pb2.AppMessage | None:
         """
