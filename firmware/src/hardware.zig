@@ -34,14 +34,25 @@ fn gpio_interrupt() callconv(.c) void {
     const intr2_status = peripherals.IO_BANK0.INTR2.read();
     if (intr2_status.GPIO23_EDGE_LOW == 1) {
         pps1.toggle();
-        peripherals.IO_BANK0.INTR2.modify(.{ .GPIO23_EDGE_LOW = 1 });
     }
 
     const intr3_status = peripherals.IO_BANK0.INTR3.read();
     if (intr3_status.GPIO24_EDGE_LOW == 1) {
         pps2.toggle();
-        peripherals.IO_BANK0.INTR3.modify(.{ .GPIO24_EDGE_LOW = 1 });
     }
+
+    const int_status = peripherals.IO_BANK0.INTR0.read();
+    if (int_status.GPIO4_EDGE_LOW == 1) {
+        pps1.enable(false);
+    }
+    if (int_status.GPIO5_EDGE_LOW == 1) {
+        pps2.enable(false);
+    }
+
+    peripherals.IO_BANK0.INTR2.modify(.{ .GPIO23_EDGE_LOW = 1 });
+    peripherals.IO_BANK0.INTR3.modify(.{ .GPIO24_EDGE_LOW = 1 });
+    peripherals.IO_BANK0.INTR0.modify(.{ .GPIO4_EDGE_LOW = 1 });
+    peripherals.IO_BANK0.INTR0.modify(.{ .GPIO4_EDGE_LOW = 1 });
 }
 
 // --- Initialization Functions ---
@@ -61,6 +72,25 @@ fn init_pwr_buttons() void {
     interrupt.enable(.IO_IRQ_BANK0);
     interrupt.globally_enable();
     _ = interrupt.set_handler(.IO_IRQ_BANK0, .{ .c = gpio_interrupt });
+}
+
+fn init_pd_interrupts() void {
+    const pd1_int = rp2xxx.gpio.num(4);
+    const pd2_int = rp2xxx.gpio.num(5);
+
+    pd1_int.set_function(.sio);
+    pd1_int.set_direction(.in);
+    pd1_int.set_schmitt_trigger(.enabled);
+
+    pd2_int.set_function(.sio);
+    pd2_int.set_direction(.in);
+    pd2_int.set_schmitt_trigger(.enabled);
+
+    peripherals.IO_BANK0.PROC0_INTE0.modify(.{ .GPIO4_EDGE_LOW = 1 });
+    peripherals.IO_BANK0.PROC0_INTE0.modify(.{ .GPIO5_EDGE_LOW = 1 });
+    //interrupt.enable(.IO_IRQ_BANK0);
+    //interrupt.globally_enable();
+    //_ = interrupt.set_handler(.IO_IRQ_BANK0, .{ .c = gpio_interrupt });
 }
 
 fn init_gpio_bank_voltage() !void {
@@ -97,9 +127,10 @@ fn screen_init() !void {
 
 // A single public init function to be called from main
 pub fn init() !void {
+    try pps_init();
+    init_pd_interrupts();
     init_pwr_buttons();
     try init_gpio_bank_voltage();
-    try pps_init();
     try screen_init();
 }
 
