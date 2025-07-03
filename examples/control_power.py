@@ -1,4 +1,4 @@
-import LogicWeave
+from LogicWeave import LogicWeave, BankVoltage, GPIOMode
 
 with LogicWeave() as lw:
     # Print the firmware version
