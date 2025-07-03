@@ -54,7 +54,7 @@ pub fn main() !void {
 
         // Periodically update the e-paper display
         const now = time.get_time_since_boot().to_us();
-        if (now - last_update_time > 1_000_000) { // 1 second
+        if (now - last_update_time > 1_000_000_000) { // 1 second
             last_update_time = now;
             hardware.poll_and_update_display() catch {}; // Ignore display errors
         }

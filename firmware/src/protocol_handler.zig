@@ -103,6 +103,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
             },
             .usb_pd_write_pdo_request => |request| {
                 const pps = try hardware.getPPS(request.channel);
+                var sent_request = false;
                 // Read in all of the PDO options
                 for (1..14) |i| {
                     const pdo = try pps.readSourcePDO(@intCast(i));
@@ -112,23 +113,24 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                         if (request.voltage_mv > pdo.get_voltage_mv(false)) continue;
                         if (request.voltage_mv < pdo.get_voltage_min_mv(false)) continue;
                         if (request.current_limit_ma > pdo.get_current_ma()) continue;
+                        //if (request.voltage_mv % 100 == 0) { continue };
                     } else {
                         if (request.voltage_mv != pdo.get_voltage_mv(false)) continue;
                         if (request.current_limit_ma > pdo.get_current_ma()) continue;
                     }
 
                     // PDO_INDEX: Use the current PDO index 'i'
-                    const pdo_index: u16 = @intCast(i);
+                    const pdo_index: u4 = @intCast(i);
 
                     // VOLTAGE_SEL: Also crucial. "mV/100 for PPS, mV/200 for AVS".
                     // Assuming for now it's a PPS PDO for simplicity, so mV/100.
                     // You need to confirm if the PDO is PPS or AVS.
-                    const voltage_sel: u16 = @intCast(request.voltage_mv / 100); // Assuming PPS for now.
+                    const voltage_sel: u8 = @intCast(request.voltage_mv / 100); // Assuming PPS for now.
 
                     // CURRENT_SEL: Derived from the requested current using the get_current_ma logic.
                     // We need to find the smallest current_max_code that results in a current
                     // equal to or greater than request.current_ma.
-                    var current_sel: u16 = 0; // Initialize with the smallest possible code
+                    var current_sel: u4 = 0; // Initialize with the smallest possible code
                     while (true) {
                         const calculated_current_ma: u32 = 1000 + (@as(u32, current_sel) * 266);
                         if (calculated_current_ma >= request.current_limit_ma) {
@@ -141,15 +143,15 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                         }
                     }
 
-                    // Construct the pdo_request u16
-                    const pdo_request_u16: u16 =
-                        (pdo_index << 12) | // Bits 12-15
-                        (current_sel << 8) | // Bits 8-11
-                        (voltage_sel); // Bits 0-7
-
-                    try pps.requestPDO(pdo_request_u16);
+                    try pps.requestPDO(.{
+                        .pdo_index = pdo_index,
+                        .current_select = current_sel,
+                        .voltage_select = voltage_sel,
+                    });
+                    sent_request = true;
                     break;
                 }
+                if (!sent_request) return error.InvalidPDRequest;
 
                 try usb_cdc_write_protobuf(.{ .usb_pd_write_pdo_response = .{ .status = 200 } }, allocator);
             },

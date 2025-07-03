@@ -44,9 +44,11 @@ fn gpio_interrupt() callconv(.c) void {
     const int_status = peripherals.IO_BANK0.INTR0.read();
     if (int_status.GPIO4_EDGE_LOW == 1) {
         pps1.enable(false);
+        pps1.configureProtections(PPS.DEFAULT_CONFIG) catch {};
     }
     if (int_status.GPIO5_EDGE_LOW == 1) {
         pps2.enable(false);
+        pps2.configureProtections(PPS.DEFAULT_CONFIG) catch {};
     }
 
     peripherals.IO_BANK0.INTR2.modify(.{ .GPIO23_EDGE_LOW = 1 });
@@ -88,9 +90,6 @@ fn init_pd_interrupts() void {
 
     peripherals.IO_BANK0.PROC0_INTE0.modify(.{ .GPIO4_EDGE_LOW = 1 });
     peripherals.IO_BANK0.PROC0_INTE0.modify(.{ .GPIO5_EDGE_LOW = 1 });
-    //interrupt.enable(.IO_IRQ_BANK0);
-    //interrupt.globally_enable();
-    //_ = interrupt.set_handler(.IO_IRQ_BANK0, .{ .c = gpio_interrupt });
 }
 
 fn init_gpio_bank_voltage() !void {
@@ -145,10 +144,6 @@ pub fn getPPS(channel: u32) !*PPS {
         1 => &pps1,
         2 => &pps2,
         else => return error.InvalidChannel,
-    };
-    // Check to make sure its connected
-    _ = pps.getStatus() catch {
-        return error.PDNotConnected;
     };
     return pps;
 }

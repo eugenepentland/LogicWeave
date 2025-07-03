@@ -83,6 +83,7 @@ pub fn init(sda_pin: u8, scl_pin: u8, gate_pin: u8, i2c_instance: i2c.I2C) !AP33
 
     var device = AP33772S{ .i2c_instance = i2c_instance, .gate_gpio = gate_gpio, .gate_open = false };
     device.enable(false);
+    device.configureProtections(DEFAULT_CONFIG) catch {};
     return device;
 }
 
@@ -144,6 +145,38 @@ const Status = packed struct {
     started: u1,
 };
 
+const Mask = packed struct {
+    _reserved: u1,
+    OTP: u1,
+    OCP: u1,
+    OVP: u1,
+    NEWPDO: u1,
+    READY: u1,
+    STARTED: u1,
+};
+
+const Config = packed struct {
+    DR_EN: u1,
+    OTP_EN: u1,
+    OCP_EN: u1,
+    OVP_EN: u1,
+    UVP_EN: u1,
+    _reserved1: u1,
+    _reserved2: u1,
+    _reserved3: u1,
+};
+
+pub const DEFAULT_CONFIG: Config = .{
+    ._reserved1 = 0,
+    ._reserved2 = 0,
+    ._reserved3 = 0,
+    .DR_EN = 0,
+    .OCP_EN = 1,
+    .OTP_EN = 1,
+    .OVP_EN = 1,
+    .UVP_EN = 1,
+};
+
 pub fn getStatus(self: *AP33772S) !Status {
     var status_byte = [1]u8{0};
     try self.readRegister(.STATUS, status_byte[0..]);
@@ -195,23 +228,28 @@ pub fn readRequestedCurrentMa(self: *AP33772S) !u16 {
     return raw_ireq * 10; // LSB is 10mA [cite: 174]
 }
 
+pub const PDORequest = packed struct {
+    pdo_index: u4,
+    current_select: u4,
+    voltage_select: u8,
+};
+
 // Sends a PDO request message (PD_REQMSG 0x31) [cite: 82, 174]
 // pdo_request format (16-bit):
 // Bits 12:15: PDO_INDEX (1-7 for SPR, 8-13 for EPR)
 // Bits 8:11: CURRENT_SEL (0-15 for 1.00A - 5.00A, TBD exact mapping)
 // Bits 0:7: VOLTAGE_SEL (mV/100 for PPS, mV/200 for AVS)
-pub fn requestPDO(self: *AP33772S, pdo_request: u16) !void {
+pub fn requestPDO(self: *AP33772S, pdo_request: PDORequest) !void {
     var request_bytes: [2]u8 = undefined;
-    std.mem.writeInt(u16, request_bytes[0..], pdo_request, .little); // Little Endian [cite: 185]
+    std.mem.writeInt(u16, request_bytes[0..], @bitCast(pdo_request), .little); // Little Endian [cite: 185]
     try self.writeRegister(.PD_REQMSG, &request_bytes);
     // May need to check PD_MSGRLT (0x33) afterwards for success/failure [cite: 84]
 }
 
 // Reads the result of the last PD request/command (PD_MSGRLT 0x33) [cite: 174]
 pub fn getPdMessageResult(self: *AP33772S) !u8 {
-    var result_byte: u8 = undefined;
-    try self.readRegister(.PD_MSGRLT, &result_byte);
-    return result_byte;
+    try self.readRegister(.PD_MSGRLT, readBuff[0..]);
+    return readBuff[0];
 }
 
 // Example: Set OTP Threshold (OTPTHR 0x1A) [cite: 98, 174]
@@ -219,10 +257,14 @@ pub fn setOTPThreshold(self: *AP33772S, threshold_celsius: u8) !void {
     try self.writeRegister(.OTPTHR, &.{threshold_celsius});
 }
 
+pub fn readMask(self: *AP33772S) !Mask {
+    try self.readRegister(.MASK, readBuff[0..]);
+    return @bitCast(readBuff[0]);
+}
+
 // Example: Configure protection features (CONFIG 0x04) [cite: 137, 174]
-// bit 7: DR_EN, bit 6: OTP_EN, bit 5: OCP_EN, bit 4: OVP_EN, bit 3: UVP_EN
-pub fn configureProtections(self: *AP33772S, config_byte: u8) !void {
-    try self.writeRegister(.CONFIG, &.{config_byte});
+pub fn configureProtections(self: *AP33772S, config_byte: Config) !void {
+    try self.writeRegister(.CONFIG, &.{@bitCast(config_byte)});
 }
 
 pub fn setPDConfig(self: *AP33772S, config_byte: u8) !void {
