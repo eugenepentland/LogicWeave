@@ -83,10 +83,10 @@ pub fn init(
 }
 
 /// CoG initialization function (mirrors C++ EPD_Driver::COG_initial)
-pub fn cog_initial(self: *@This()) void {
+pub fn cog_initial(self: *@This()) !void {
     // Corrected flow:
     self._reset(5, 5, 10, 5, 5); // Or your preferred EPD reset timing, e.g., matching C++ SmallP.
-    self._soft_reset(); // Send 0x00, 0x0E and wait for busy.
+    try self._soft_reset(); // Send 0x00, 0x0E and wait for busy.
 
     const psr_values = self.read_panel_settings_revised();
     self.psr = psr_values;
@@ -217,7 +217,7 @@ fn _bitbang_recv_byte(self: *@This()) u8 {
 /// CoG shutdown function (mirrors C++ EPD_Driver::COG_powerOff)
 pub fn cog_power_off(self: *@This()) void {
     self._sendCommandData8(0x02);
-    self.wait_for_busy_high();
+    self.wait_for_busy_high(1000);
     self.dc_pin.put(0);
     self.cs_pin.put(0);
     time.sleep_ms(150);
@@ -231,7 +231,7 @@ pub fn global_update(
     new_image: []const u8,
     mode: UpdateMode,
     tsset: u8, // signed 8-bit temperature
-) void {
+) !void {
     const tsset_cmd: u8 = switch (mode) {
         .Normal => tsset,
         .Fast => tsset + 0x40,
@@ -247,8 +247,8 @@ pub fn global_update(
             self._send_index_data(0x00, self.psr[0..]);
             self._send_index_data(0x10, new_image); // DTM1
             self._send_index_data(0x13, &[_]u8{0} ** TOTAL_BYTES_PER_FRAME); // DTM2 = dummy
-            self._dcdc_power_on();
-            self._display_refresh();
+            try self._dcdc_power_on();
+            try self._display_refresh();
         },
         .Fast => {
             // Panel Settings
@@ -265,17 +265,24 @@ pub fn global_update(
 
             self._sendCommandData(0x50, 0x07); // VCOM/Data Interval Setting (after sending images)
 
-            self._dcdc_power_on();
-            self._display_refresh();
+            try self._dcdc_power_on();
+            try self._display_refresh();
         },
     }
 }
 
 // ---------- PROTECTED/PRIVATE FUNCTIONS -----------
 
-fn wait_for_busy_high(self: *@This()) void {
+fn wait_for_busy_high(self: *@This(), timeout_ms: u16) !void {
+    const sleep_time_ms = 1;
+    var count: u16 = 0;
     while (self.busy_pin.read() == 0) {
-        time.sleep_us(100); // Small delay to prevent hard spinning
+        time.sleep_ms(sleep_time_ms); // Small delay to prevent hard spinning
+        count += 1;
+
+        if ((count * sleep_time_ms) >= timeout_ms) {
+            return error.BusyCheckTimeout;
+        }
     }
 }
 
@@ -313,14 +320,14 @@ fn _sendCommandData8(self: *@This(), index: u8) void {
     self.cs_pin.put(1);
 }
 
-fn _soft_reset(self: *@This()) void {
+fn _soft_reset(self: *@This()) !void {
     self._sendCommandData(0x00, 0x0E);
-    self.wait_for_busy_high();
+    try self.wait_for_busy_high(1000);
 }
 
-fn _display_refresh(self: *@This()) void {
+fn _display_refresh(self: *@This()) !void {
     self._sendCommandData8(0x12);
-    self.wait_for_busy_high();
+    try self.wait_for_busy_high(1000);
 }
 
 fn _reset(self: *@This(), ms1: u32, ms2: u32, ms3: u32, ms4: u32, ms5: u32) void {
@@ -335,7 +342,7 @@ fn _reset(self: *@This(), ms1: u32, ms2: u32, ms3: u32, ms4: u32, ms5: u32) void
     time.sleep_ms(ms5);
 }
 
-fn _dcdc_power_on(self: *@This()) void {
+fn _dcdc_power_on(self: *@This()) !void {
     self._sendCommandData8(0x04);
-    self.wait_for_busy_high();
+    try self.wait_for_busy_high(1000);
 }

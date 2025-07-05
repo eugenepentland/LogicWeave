@@ -87,7 +87,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 try usb_cdc_write_protobuf(.{ .clear_screen_response = .{ .status = 200 } }, allocator);
             },
             .refresh_screen_request => |_| {
-                hardware.screen.global_update(
+                try hardware.screen.global_update(
                     Graphics.Graphics.getRotatedBuffer(hardware.g.old_frame_buffer)[0..],
                     Graphics.Graphics.getRotatedBuffer(hardware.g.frame_buffer)[0..],
                     .Fast,

@@ -200,7 +200,8 @@ pub fn readVoltageMv(self: *AP33772S) !u16 {
 // Reads the VOUT current register (0x12) and converts to milliamps
 pub fn readCurrentMa(self: *AP33772S) !u16 {
     try self.readRegister(.CURRENT, readBuff[0..]); // Pass a mutable slice
-    return @as(u16, readBuff[0]) * 24; // LSB is 24mA
+    const value: u16 = @intCast(readBuff[0]);
+    return value; // * 24; // LSB is 24mA
 }
 
 // Reads the TEMP register (0x13) [cite: 174]

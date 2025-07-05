@@ -118,9 +118,9 @@ fn screen_init() !void {
         rp2xxx.gpio.num(11),
         rp2xxx.spi.instance.num(1),
     );
-    screen.cog_initial();
+    try screen.cog_initial();
     g = Graphics.Graphics.init();
-    screen.global_update(&[_]u8{0x00} ** TOTAL_BYTES_PER_FRAME, &[_]u8{0x00} ** TOTAL_BYTES_PER_FRAME, .Normal, 0x19);
+    try screen.global_update(&[_]u8{0x00} ** TOTAL_BYTES_PER_FRAME, &[_]u8{0x00} ** TOTAL_BYTES_PER_FRAME, .Normal, 0x19);
     g.refreshFrameBuffer();
 }
 
@@ -130,7 +130,7 @@ pub fn init() !void {
     init_pd_interrupts();
     init_pwr_buttons();
     try init_gpio_bank_voltage();
-    try screen_init();
+    screen_init() catch {};
 }
 
 // --- Public Hardware Control Functions ---
@@ -189,7 +189,7 @@ pub fn poll_and_update_display() !void {
     try poll_voltage_current(&pps2, 5);
     try poll_voltage_current(&pps1, 150);
 
-    screen.global_update(Graphics.Graphics.getRotatedBuffer(g.old_frame_buffer)[0..], Graphics.Graphics.getRotatedBuffer(g.frame_buffer)[0..], .Fast, 25);
+    try screen.global_update(Graphics.Graphics.getRotatedBuffer(g.old_frame_buffer)[0..], Graphics.Graphics.getRotatedBuffer(g.frame_buffer)[0..], .Fast, 25);
     g.refreshFrameBuffer();
 }
 
