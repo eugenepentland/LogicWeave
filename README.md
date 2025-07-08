@@ -7,7 +7,7 @@
 ---
 
 ## Hardware Overview
-
+![LogicWeave Hardware Block Diagram](docs/images/hardware_bd.png)
 - **Microcontroller**: Raspberry Pi RP2350B for significant processing power.
 - **Dual USB-C PD/PPS Channels**: Independent USB Type-C ports support Power Delivery (PD) and Programmable Power Supply (PPS).
 - **USB-C Host Connection**: Seamless USB-C connection to a host computer.
