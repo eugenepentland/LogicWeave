@@ -12,6 +12,7 @@ const usb_cfg = @import("usb_config.zig");
 
 const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
+const Duration = microzig.drivers.time.Duration;
 
 var usb_rx_buff: [1024]u8 = undefined;
 
@@ -64,6 +65,34 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator) void {
     }
 }
 
+fn calculateCurrentSelect(target_ma: u32) u4 {
+    // These constants should be defined at a higher scope or within the device struct
+    const CURRENT_BASE_MA: u32 = 1000; // 1.00A
+    const CURRENT_STEP_MA: u32 = 266; // 266mA per step
+    const MAX_CURRENT_SEL: u4 = 15;
+
+    // Handle cases below the base current
+    if (target_ma < CURRENT_BASE_MA) {
+        return 0; // Or return an error, depends on desired behavior.
+        // If 0 maps to 1000mA, then 0 is the minimum.
+    }
+
+    // Re-evaluate the loop as it is robust for this calculation:
+    var current_sel: u4 = 0;
+    while (true) {
+        const calculated_current_ma: u32 = CURRENT_BASE_MA + (@as(u32, current_sel) * CURRENT_STEP_MA);
+        if (calculated_current_ma >= target_ma) {
+            break;
+        }
+        current_sel += 1;
+        if (current_sel > MAX_CURRENT_SEL) {
+            current_sel = MAX_CURRENT_SEL; // Cap at max
+            break;
+        }
+    }
+    return current_sel;
+}
+
 fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
     const msg = try protobuf.pb_decode(definitions.AppMessage, input, allocator);
     defer msg.deinit();
@@ -77,6 +106,11 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                     .version = protobuf.ManagedString.managed("1.0.1"),
                     .updated_at = protobuf.ManagedString.managed(firmware_config.UPDATED_AT),
                 } }, allocator);
+            },
+            .sd_info_request => |_| {
+                try hardware.sd.initialize(20_000_000);
+                //const capactiy_bytes = (try hardware.sd.readCSD()).capacity_bytes;
+                try usb_cdc_write_protobuf(.{ .sd_info_response = .{ .capacity_bytes = 10 } }, allocator);
             },
             .write_text_request => |request| {
                 try hardware.g.drawString(request.text.getSlice(), @intCast(request.x), @intCast(request.y));
@@ -101,9 +135,58 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 pps.enable(request.on);
                 try usb_cdc_write_protobuf(.{ .usb_pd_enable_response = .{ .status = 200 } }, allocator);
             },
+            .uart_setup_request => |request| {
+                const tx_pin = hardware.getGPIO(request.tx_pin);
+                const rx_pin = hardware.getGPIO(request.rx_pin);
+                const uart = rp2xxx.uart.instance.num(@intCast(request.instance_num));
+
+                inline for (&.{ tx_pin, rx_pin }) |pin| {
+                    pin.set_function(.uart);
+                }
+
+                try uart.apply_runtime(.{
+                    .baud_rate = @intCast(request.baud_rate),
+                    .clock_config = rp2xxx.clock_config,
+                });
+                try usb_cdc_write_protobuf(.{ .uart_setup_response = .{ .status = 200 } }, allocator);
+            },
+            .uart_write_request => |request| {
+                const uart = rp2xxx.uart.instance.num(@intCast(request.instance_num));
+                const data = request.data.getSlice();
+
+                uart.write_blocking(data, Duration.from_ms(@intCast(request.timeout_ms))) catch {
+                    uart.clear_errors();
+                };
+                try usb_cdc_write_protobuf(.{ .uart_write_response = .{ .status = 200 } }, allocator);
+            },
+            .uart_read_request => |request| {
+                const uart = rp2xxx.uart.instance.num(@intCast(request.instance_num));
+                var buff: []u8 = try allocator.alloc(u8, @truncate(request.byte_count));
+                defer allocator.free(buff);
+
+                uart.read_blocking(buff, Duration.from_ms(@intCast(request.timeout_ms))) catch {
+                    // You need to clear UART errors before making a new transaction
+                    uart.clear_errors();
+                };
+                const resp: definitions.AppMessage.kind_union = .{ .uart_read_response = .{ .data = protobuf.ManagedString.managed(buff[0..]) } };
+                try usb_cdc_write_protobuf(resp, allocator);
+            },
             .usb_pd_write_pdo_request => |request| {
                 const pps = try hardware.getPPS(request.channel);
-                var sent_request = false;
+
+                if (request.pdo_index > 0 and request.pdo_index < 14) {
+                    try pps.requestPDO(.{
+                        .pdo_index = @intCast(request.pdo_index),
+                        .current_select = 0x0F,
+                        .voltage_select = 0xFF,
+                    });
+
+                    try usb_cdc_write_protobuf(.{ .usb_pd_write_pdo_response = .{
+                        .pdo_index = request.pdo_index,
+                    } }, allocator);
+                    return;
+                }
+
                 // Read in all of the PDO options
                 for (1..14) |i| {
                     const pdo = try pps.readSourcePDO(@intCast(i));
@@ -130,30 +213,22 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                     // CURRENT_SEL: Derived from the requested current using the get_current_ma logic.
                     // We need to find the smallest current_max_code that results in a current
                     // equal to or greater than request.current_ma.
-                    var current_sel: u4 = 0; // Initialize with the smallest possible code
-                    while (true) {
-                        const calculated_current_ma: u32 = 1000 + (@as(u32, current_sel) * 266);
-                        if (calculated_current_ma >= request.current_limit_ma) {
-                            break; // Found the smallest current_max_code that meets the requirement
-                        }
-                        current_sel += 1;
-                        if (current_sel > 15) { // current_max_code is 4-bit, so max 15
-                            current_sel = 15; // Cap at max if for some reason it goes above
-                            break;
-                        }
-                    }
+                    const current_sel: u4 = calculateCurrentSelect(request.current_limit_ma);
 
                     try pps.requestPDO(.{
                         .pdo_index = pdo_index,
                         .current_select = current_sel,
                         .voltage_select = voltage_sel,
                     });
-                    sent_request = true;
-                    break;
-                }
-                if (!sent_request) return error.InvalidPDRequest;
 
-                try usb_cdc_write_protobuf(.{ .usb_pd_write_pdo_response = .{ .status = 200 } }, allocator);
+                    try usb_cdc_write_protobuf(.{ .usb_pd_write_pdo_response = .{
+                        .pdo_index = pdo_index,
+                    } }, allocator);
+
+                    return;
+                }
+
+                return error.InvalidPDRequest;
             },
             .usb_pd_read_pdo_request => |request| {
                 const pps = try hardware.getPPS(request.channel);

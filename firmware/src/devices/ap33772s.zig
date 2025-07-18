@@ -108,9 +108,8 @@ pub fn deinit(self: *AP33772S) void {
 fn writeRegister(self: *AP33772S, reg_addr: Register, data: []const u8) !void {
     // I2C Write format: [Device Address + W] [Command Byte] [Data Bytes...] [Stop] [cite: 179, 182, 183]
     // Need a buffer for command + data
-    var write_buffer: [32]u8 = undefined; // Adjust size as needed, max 26 for SRCPDO? Check other commands. PD_REQMSG needs 3 bytes total.
+    var write_buffer: [8]u8 = undefined; // Adjust size as needed, max 26 for SRCPDO? Check other commands. PD_REQMSG needs 3 bytes total.
     if (data.len + 1 > write_buffer.len) {
-        std.log.err("Write buffer too small for reg {x} data len {}\n", .{ reg_addr.asU8(), data.len });
         return error.BufferTooSmall;
     }
 
@@ -189,28 +188,28 @@ pub fn getOperationMode(self: *AP33772S) !u8 {
     return opmode_byte;
 }
 
-// Reads the VOUT voltage register (0x11) and converts to millivolts [cite: 174]
+// Reads the VOUT voltage register (0x11) and converts to millivolts
 pub fn readVoltageMv(self: *AP33772S) !u16 {
-    try self.readRegister(.VOLTAGE, &readBuff);
-    // Data is Little Endian (Datasheet Page 16) [cite: 185]
-    const raw_voltage = std.mem.readInt(u16, readBuff[0..], .little);
-    return raw_voltage * 80; // LSB is 80mV [cite: 174]
+    var buff: [2]u8 = undefined;
+    try self.readRegister(.VOLTAGE, &buff);
+    // Data is Little Endian [cite: 613]
+    const raw_voltage = std.mem.readInt(u16, buff[0..], .little);
+    return raw_voltage * 80; // LSB is 80mV
 }
 
-// Reads the VOUT current register (0x12) and converts to milliamps
+// CORRECTED: Reads the VOUT current register (0x12) and converts to milliamps
 pub fn readCurrentMa(self: *AP33772S) !u16 {
-    try self.readRegister(.CURRENT, readBuff[0..]); // Pass a mutable slice
-    const value: u16 = @intCast(readBuff[0]);
-    return value; // * 24; // LSB is 24mA
+    var buff: [1]u8 = undefined; // CORRECT: Use a 1-byte buffer
+    try self.readRegister(.CURRENT, &buff); // Pass a 1-byte slice
+    const value: u16 = @intCast(buff[0]);
+    return value * 24; // LSB is 24mA
 }
 
-// Reads the TEMP register (0x13) [cite: 174]
-// Note: Datasheet indicates Unit: °C, but default is 19h (+25°C).
-// Requires initialization of TRxx registers for accuracy. [cite: 167]
-// Consider if an offset needs to be applied based on TRxx calibration.
+// CORRECTED: Reads the TEMP register (0x13)
 pub fn readTemperature(self: *AP33772S) !u8 {
-    try self.readRegister(.TEMP, readBuff[0..]);
-    return readBuff[0];
+    var buff: [1]u8 = undefined; // CORRECT: Use a 1-byte buffer
+    try self.readRegister(.TEMP, &buff);
+    return buff[0];
 }
 
 // Reads the requested voltage (VREQ) register (0x14) and converts to millivolts [cite: 174]
@@ -242,15 +241,24 @@ pub const PDORequest = packed struct {
 // Bits 0:7: VOLTAGE_SEL (mV/100 for PPS, mV/200 for AVS)
 pub fn requestPDO(self: *AP33772S, pdo_request: PDORequest) !void {
     var request_bytes: [2]u8 = undefined;
-    std.mem.writeInt(u16, request_bytes[0..], @bitCast(pdo_request), .little); // Little Endian [cite: 185]
+
+    // Bits 0-7: VOLTAGE_SEL
+    request_bytes[0] = pdo_request.voltage_select;
+
+    // Bits 8-11: CURRENT_SEL (<< 0)
+    // Bits 12-15: PDO_INDEX (<< 4)
+    request_bytes[1] =
+        (@as(u8, pdo_request.current_select) & 0xF) |
+        ((@as(u8, pdo_request.pdo_index) & 0xF) << 4);
+
     try self.writeRegister(.PD_REQMSG, &request_bytes);
-    // May need to check PD_MSGRLT (0x33) afterwards for success/failure [cite: 84]
 }
 
 // Reads the result of the last PD request/command (PD_MSGRLT 0x33) [cite: 174]
 pub fn getPdMessageResult(self: *AP33772S) !u8 {
-    try self.readRegister(.PD_MSGRLT, readBuff[0..]);
-    return readBuff[0];
+    var buff: [1]u8 = undefined; // CORRECT: Use a 1-byte buffer
+    try self.readRegister(.PD_MSGRLT, &buff);
+    return buff[0];
 }
 
 // Example: Set OTP Threshold (OTPTHR 0x1A) [cite: 98, 174]

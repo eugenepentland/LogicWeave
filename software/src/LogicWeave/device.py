@@ -6,6 +6,143 @@ from LogicWeave.exceptions import DeviceFirmwareError, DeviceResponseError, Devi
 from .definitions import GPIOMode, BankVoltage
 import serial.tools.list_ports
 
+class PDChannel:
+    """Represents a single USB Power Delivery (PD) channel on the device."""
+    def __init__(self, controller: 'LogicWeave', channel_num: int):
+        """
+        Initializes a PDChannel object. Users should get this from LogicWeave.pd_channel().
+
+        Args:
+            controller (LogicWeave): The main device controller instance.
+            channel_num (int): The USB PD channel number this object will control.
+        """
+        self._controller = controller
+        self.channel_num = channel_num
+
+    def enable_output(self, on: bool):
+        """
+        Enables or disables the output of this PD channel.
+
+        Args:
+            on (bool): True to enable output, False to disable.
+        """
+        request = all_pb2.UsbPDEnableRequest(channel=self.channel_num, on=on)
+        self._controller._send_and_parse(request, "usb_pd_enable_response")
+
+    def read_status(self) -> all_pb2.UsbPDReadResponse:
+        """
+        Reads the current voltage and current of this USB PD channel.
+
+        Returns:
+            all_pb2.UsbPDReadResponse: The response containing voltage and current.
+        """
+        request = all_pb2.UsbPDReadRequest(channel=self.channel_num)
+        response = self._controller._send_and_parse(request, "usb_pd_read_response")
+        return response
+
+    def read_source_capability(self, pdo_index: int) -> all_pb2.UsbPDReadPDOResponse:
+        """
+        Reads a specific Power Data Object (PDO) from this USB PD source,
+        describing its power capabilities.
+
+        Args:
+            pdo_index (int): The index of the PDO to read.
+
+        Returns:
+            all_pb2.UsbPDReadPDOResponse: The response containing the PDO information.
+        """
+        request = all_pb2.UsbPDReadPDORequest(channel=self.channel_num, index=pdo_index)
+        response = self._controller._send_and_parse(request, "usb_pd_read_pdo_response")
+        return response
+
+    def request_power(self, voltage_mv: int, current_limit_ma: int, pdo_index: int = 0):
+        """
+        Requests a specific voltage and current from this USB PD source.
+
+        Args:
+            voltage_mv (int): The requested voltage in millivolts.
+            current_limit_ma (int): The requested current limit in milliamps.
+            pdo_index (int): The index of the PDO to request (defaults to 0).
+        """
+        request = all_pb2.UsbPDWritePDORequest(
+            channel=self.channel_num,
+            voltage_mv=voltage_mv,
+            current_limit_ma=current_limit_ma,
+            pdo_index=pdo_index
+        )
+        self._controller._send_and_parse(request, "usb_pd_write_pdo_response")
+
+    def __repr__(self):
+        return f"<PDChannel channel={self.channel_num}>"
+
+class UART:
+    """Represents a configured UART peripheral instance."""
+    def __init__(self, controller: 'LogicWeave', instance_num: int, tx_pin: int, rx_pin: int, baud_rate: int):
+        """
+        Initializes and configures a UART bus. Users should get this from LogicWeave.uart().
+
+        Args:
+            controller (LogicWeave): The main device controller instance.
+            instance_num (int): The hardware instance number assigned by the controller.
+            tx_pin (int): The pin to use for UART TX.
+            rx_pin (int): The pin to use for UART RX.
+            baud_rate (int): The communication speed in bits per second.
+        """
+        self._controller = controller
+        self._instance_num = instance_num
+        self.tx_pin = tx_pin
+        self.rx_pin = rx_pin
+        self.baud_rate = baud_rate
+
+        # Automatically configure the peripheral on the device upon creation
+        self._setup()
+
+    def _setup(self):
+        """Sends the UART setup command to the device."""
+        request = all_pb2.UartSetupRequest(
+            instance_num=self._instance_num,
+            tx_pin=self.tx_pin,
+            rx_pin=self.rx_pin,
+            baud_rate=self.baud_rate
+        )
+        self._controller._send_and_parse(request, "uart_setup_response")
+
+    def write(self, data: bytes, timeout_ms: int = 1000):
+        """
+        Writes data to this UART bus.
+
+        Args:
+            data (bytes): The data to write.
+            timeout_ms (int): The timeout for the write operation in milliseconds.
+        """
+        request = all_pb2.UartWriteRequest(
+            instance_num=self._instance_num,
+            data=data,
+            timeout_ms=timeout_ms
+        )
+        self._controller._send_and_parse(request, "uart_write_response")
+
+    def read(self, byte_count: int, timeout_ms: int = 1000) -> bytes:
+        """
+        Reads a number of bytes from this UART bus.
+
+        Args:
+            byte_count (int): The number of bytes to read.
+
+        Returns:
+            bytes: The data read from the device.
+        """
+        request = all_pb2.UartReadRequest(
+            instance_num=self._instance_num,
+            byte_count=byte_count,
+            timeout_ms=timeout_ms
+        )
+        response = self._controller._send_and_parse(request, "uart_read_response")
+        return response.data if self._controller.mode == "serial" else b""
+
+    def __repr__(self):
+        return f"<UART instance={self._instance_num} tx={self.tx_pin} rx={self.rx_pin} baud={self.baud_rate}>"
+
 class GPIO:
     """Represents a single GPIO pin on the device."""
     def __init__(self, controller: 'LogicWeave', pin: int):
@@ -300,7 +437,10 @@ class LogicWeave:
             all_pb2.RefreshScreenRequest: "refresh_screen_request",
             all_pb2.FirmwareInfoRequest: "firmware_info_request",
             all_pb2.SoftSPIWriteRequest: "soft_spi_write_request",
-            all_pb2.WriteBankVoltageRequest: "write_bank_voltage_request"
+            all_pb2.WriteBankVoltageRequest: "write_bank_voltage_request",
+            all_pb2.UartSetupRequest: "uart_setup_request", # ADDED
+            all_pb2.UartReadRequest: "uart_read_request",   # ADDED
+            all_pb2.UartWriteRequest: "uart_write_request"  # ADDED
         }
 
         # Map for response field names to their corresponding message classes.
@@ -313,6 +453,7 @@ class LogicWeave:
             "spi_read_response": all_pb2.SPIReadResponse,
             "usb_pd_read_response": all_pb2.UsbPDReadResponse,
             "usb_pd_read_pdo_response": all_pb2.UsbPDReadPDOResponse,
+            "uart_read_response": all_pb2.UartReadResponse, # ADDED
             # For responses that are typically just Empty messages (assuming 'Empty' exists in messages_pb2.py)
             "empty": all_pb2.Empty,
             "gpio_write_response": all_pb2.Empty,
@@ -329,8 +470,37 @@ class LogicWeave:
             "refresh_screen_response": all_pb2.Empty,
             "usb_bootloader_response": all_pb2.Empty,
             "write_bank_voltage_response": all_pb2.Empty,
+            "uart_setup_response": all_pb2.Empty, # ADDED
+            "uart_write_response": all_pb2.Empty, # ADDED
             "error_response": all_pb2.ErrorResponse, # For device-side error messages
         }
+
+    def pd_channel(self, channel_num: int) -> 'PDChannel':
+        """
+        Gets a PDChannel object to control a specific USB PD channel.
+
+        Args:
+            channel_num (int): The USB PD channel number (e.g., 0 or 1).
+
+        Returns:
+            PDChannel: An object for interacting with this USB PD channel.
+        """
+        return PDChannel(self, channel_num)
+
+    def uart(self, instance_num: int, tx_pin: int, rx_pin: int, baud_rate: int = 115200) -> 'UART':
+        """
+        Initializes a UART bus on the specified pins for a given hardware instance.
+
+        Args:
+            instance_num (int): The hardware instance number to use (e.g., 0 for UART0).
+            tx_pin (int): The pin to use for UART TX.
+            rx_pin (int): The pin to use for UART RX.
+            baud_rate (int): The communication speed in bits per second. Defaults to 115200.
+
+        Returns:
+            UART: An object for interacting with this UART bus.
+        """
+        return UART(self, instance_num, tx_pin, rx_pin, baud_rate)
 
     def gpio(self, pin: int) -> GPIO:
         """
@@ -555,168 +725,6 @@ class LogicWeave:
         request = all_pb2.EchoMessage(message=message)
         response = self._send_and_parse(request, "echo_message")
         return response.message if self.mode == "serial" else "" # Return empty string for file mode
-
-    # --- GPIO Methods ---
-    
-    def write_gpio_mode(self, pin: int, mode: all_pb2.Mode):
-        """
-        Writes the mode (input, output, pwm) for a specific GPIO pin.
-        In 'file' mode, logs the request.
-        """
-        request = all_pb2.GPIOModeRequest(gpio_pin=pin, mode=mode)
-        self._send_and_parse(request, "gpio_mode_response") # Expects an Empty response
-
-    def gpio_write(self, pin: int, state: bool):
-        """
-        Writes a boolean state (high/low) to a GPIO pin.
-        In 'file' mode, logs the request.
-        """
-        request = all_pb2.GPIOWriteRequest(gpio_pin=pin, state=state)
-        self._send_and_parse(request, "gpio_write_response") # Expects a gpio_write_response (Empty)
-
-    def gpio_read(self, pin: int) -> bool:
-        """
-        Reads the state of a GPIO pin.
-        In 'file' mode, logs the request and returns False.
-        """
-        request = all_pb2.GPIOReadRequest(gpio_pin=pin)
-        response = self._send_and_parse(request, "gpio_read_response")
-        return response.state if self.mode == "serial" else False # Return default for file mode
-
-    # --- I2C Methods ---
-
-    def write_i2c_setup(self, instance_num: int, sda_pin: int, scl_pin: int):
-        """
-        Writes the configuration for an I2C peripheral instance on the device.
-        In 'file' mode, logs the request.
-        """
-        request = all_pb2.I2CSetupRequest(
-            instance_num=instance_num, 
-            sda_pin=sda_pin, 
-            scl_pin=scl_pin
-        )
-        self._send_and_parse(request, "i2c_setup_response")
-
-    def i2c_write(self, instance_num: int, device_address: int, data: bytes):
-        """
-        Writes data to an I2C device.
-        In 'file' mode, logs the request.
-        """
-        request = all_pb2.I2CWriteRequest(
-            instance_num=instance_num,
-            device_address=device_address,
-            data=data
-        )
-        self._send_and_parse(request, "i2c_write_response")
-
-    def i2c_read(self, instance_num: int, device_address: int, byte_count: int) -> bytes:
-        """
-        Reads data from an I2C device.
-        In 'file' mode, logs the request and returns an empty bytes object.
-        """
-        request = all_pb2.I2CReadRequest(
-            instance_num=instance_num,
-            device_address=device_address,
-            byte_count=byte_count
-        )
-        response = self._send_and_parse(request, "i2c_read_response")
-        return response.data if self.mode == "serial" else b"" # Return default for file mode
-
-    # --- SPI Methods ---
-
-    def write_spi_setup(self, instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int, baud_rate: int):
-        """
-        Writes the configuration for an SPI peripheral instance on the device.
-        In 'file' mode, logs the request.
-        """
-        request = all_pb2.SPISetupRequest(
-            instance_num=instance_num,
-            sclk_pin=sclk_pin,
-            mosi_pin=mosi_pin,
-            miso_pin=miso_pin,
-            baud_rate=baud_rate
-        )
-        self._send_and_parse(request, "spi_setup_response")
-
-    def spi_write(self, instance_num: int, data: bytes, cs_pin: int = 0):
-        """
-        Writes data over an SPI interface.
-        In 'file' mode, logs the request.
-        """
-        request = all_pb2.SPIWriteRequest(
-            instance_num=instance_num,
-            data=data,
-            cs_pin=cs_pin
-        )
-        self._send_and_parse(request, "spi_write_response")
-
-    def soft_spi_write(self, cs_pin: int, sclk_pin: int, mosi_pin: int, data: bytes):
-        """
-        Writes data over a software SPI interface (bit-banged).
-        In 'file' mode, logs the request.
-        """
-        request = all_pb2.SoftSPIWriteRequest(
-            cs_pin=cs_pin,
-            sclk_pin=sclk_pin,
-            mosi_pin=mosi_pin,
-            data=data
-        )
-        self._send_and_parse(request, "soft_spi_write_response")
-
-    def spi_read(self, instance_num: int, data: int, byte_count: int, cs_pin: int = 0) -> bytes:
-        """
-        Reads data over an SPI interface.
-        In 'file' mode, logs the request and returns an empty bytes object.
-        """
-        request = all_pb2.SPIReadRequest(
-            instance_num=instance_num,
-            data=data, # Data field typically not used for outgoing in a pure read
-            cs_pin=cs_pin,
-            byte_count=byte_count
-        )
-        response = self._send_and_parse(request, "spi_read_response")
-        return response.data if self.mode == "serial" else b"" # Return default for file mode
-
-    # --- USB PD Methods ---
-
-    def write_pd_output_state(self, channel: int, on: bool):
-        """
-        Writes the enabled/disabled state for a USB PD channel's output.
-        In 'file' mode, logs the request.
-        """
-        request = all_pb2.UsbPDEnableRequest(channel=channel, on=on)
-        self._send_and_parse(request, "usb_pd_enable_response")
-
-    def read_pd_channel_status(self, channel: int) -> all_pb2.UsbPDReadResponse:
-        """
-        Reads the current voltage and current of a USB PD channel.
-        In 'file' mode, logs the request and returns a default UsbPDReadResponse.
-        """
-        request = all_pb2.UsbPDReadRequest(channel=channel)
-        response = self._send_and_parse(request, "usb_pd_read_response")
-        return response
-
-    def read_pd_source_capabilities(self, channel: int, index: int) -> all_pb2.UsbPDReadPDOResponse:
-        """
-        Reads a specific Power Data Object (PDO) from a USB PD source,
-        describing its power capabilities.
-        In 'file' mode, logs the request and returns a default UsbPDReadPDOResponse.
-        """
-        request = all_pb2.UsbPDReadPDORequest(channel=channel, index=index)
-        response = self._send_and_parse(request, "usb_pd_read_pdo_response")
-        return response
-        
-    def write_pd_power_request(self, channel: int, voltage_mv: int, current_limit_ma: int):
-        """
-        Writes a request for a specific voltage and current from a USB PD source.
-        In 'file' mode, logs the request.
-        """
-        request = all_pb2.UsbPDWritePDORequest(
-            channel=channel,
-            voltage_mv=voltage_mv,
-            current_limit_ma=current_limit_ma
-        )
-        self._send_and_parse(request, "usb_pd_write_pdo_response")
 
     def write_bank_voltage(self, bank: int, voltage: all_pb2.BankVoltage):
         """

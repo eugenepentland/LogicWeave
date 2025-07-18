@@ -5,6 +5,7 @@ const Screen = @import("devices/E2206KS0E1.zig");
 const PPS = @import("devices/ap33772s.zig");
 const Graphics = @import("graphics.zig");
 const definitions = @import("proto_gen/all.pb.zig"); // For BankVoltage enum
+const SD = @import("devices/sd.zig");
 
 const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
@@ -17,6 +18,7 @@ pub var g: Graphics.Graphics = undefined;
 pub var pps1: PPS = undefined;
 pub var pps2: PPS = undefined;
 pub var screen: Screen = undefined;
+pub var sd: SD.SD_Driver = undefined;
 
 // --- Constants ---
 const N_PIXELS = 128;
@@ -124,13 +126,26 @@ fn screen_init() !void {
     g.refreshFrameBuffer();
 }
 
+fn sd_init(alloc: std.mem.Allocator) !void {
+    sd = try SD.SD_Driver.init(
+        alloc,
+        rp2xxx.gpio.num(9),
+        rp2xxx.gpio.num(10),
+        rp2xxx.gpio.num(11),
+        rp2xxx.gpio.num(11),
+        rp2xxx.spi.instance.num(1),
+        100_000,
+    );
+}
+
 // A single public init function to be called from main
-pub fn init() !void {
+pub fn init(alloc: std.mem.Allocator) !void {
     try pps_init();
     init_pd_interrupts();
     init_pwr_buttons();
     try init_gpio_bank_voltage();
-    screen_init() catch {};
+    // screen_init() catch {};
+    try sd_init(alloc);
 }
 
 // --- Public Hardware Control Functions ---

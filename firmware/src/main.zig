@@ -1,6 +1,7 @@
 // src/main.zig
 const std = @import("std");
 const microzig = @import("microzig");
+const Duration = microzig.drivers.time.Duration;
 
 // Import our new modules
 const hardware = @import("hardware.zig");
@@ -12,8 +13,6 @@ const time = rp2xxx.time;
 const usb = rp2xxx.usb;
 
 pub const microzig_options = microzig.Options{
-    .log_level = .debug,
-    .logFn = rp2xxx.uart.logFn,
     .cpu = .{ .ram_vectors = true },
 };
 
@@ -25,22 +24,21 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noretu
 }
 
 pub fn main() !void {
+    // 3. Setup allocator for protocol handler
+    var buffer: [1024]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
+    const allocator = fba.allocator();
+
     // 1. Initialize all hardware
-    hardware.init() catch |err| {
+    hardware.init(allocator) catch |err| {
         std.log.err("Hardware init failed: {}", .{err});
         // Handle failure, maybe blink an LED
-        while (true) {}
     };
 
     // 2. Initialize the USB device
     const usb_dev = usb.Usb(.{});
     usb_dev.init_clk();
     usb_dev.init_device(&usb_cfg.DEVICE_CONFIGURATION) catch unreachable;
-
-    // 3. Setup allocator for protocol handler
-    var buffer: [128]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
-    const allocator = fba.allocator();
 
     var last_update_time: u64 = time.get_time_since_boot().to_us();
 
@@ -56,7 +54,7 @@ pub fn main() !void {
         const now = time.get_time_since_boot().to_us();
         if (now - last_update_time > 1_000_000_000) { // 1 second
             last_update_time = now;
-            hardware.poll_and_update_display() catch {}; // Ignore display errors
+            //hardware.poll_and_update_display() catch {}; // Ignore display errors
         }
     }
 }

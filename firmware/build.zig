@@ -74,6 +74,8 @@ pub fn build(b: *Build) void {
         .source_files = &.{"all.proto"}, // Change this
         .include_directories = &.{"../proto"}, // Change this
     });
+    // Make sure protoc runs before the final install (and thus before a normal build)
+    b.getInstallStep().dependOn(&protoc_step.step);
 
     // Python Protobuf generation step
     const gen_python_proto = b.addSystemCommand(&.{
@@ -83,10 +85,8 @@ pub fn build(b: *Build) void {
         "../proto/all.proto",
     });
     gen_python_proto.step.name = "gen-python-proto";
-    b.getInstallStep().dependOn(&gen_python_proto.step);
 
-    // Make sure protoc runs before the final install (and thus before a normal build)
-    b.getInstallStep().dependOn(&protoc_step.step);
+    b.getInstallStep().dependOn(&gen_python_proto.step);
 
     // 3) Zig‐module for your generated .pb.zig files
     const proto_module = b.createModule(.{

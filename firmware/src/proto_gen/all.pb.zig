@@ -357,15 +357,85 @@ pub const RefreshScreenRequest = struct {
     pub usingnamespace protobuf.MessageMixins(@This());
 };
 
+pub const UartSetupRequest = struct {
+    baud_rate: u32 = 0,
+    tx_pin: u32 = 0,
+    rx_pin: u32 = 0,
+    instance_num: u32 = 0,
+
+    pub const _desc_table = .{
+        .baud_rate = fd(1, .{ .Varint = .Simple }),
+        .tx_pin = fd(2, .{ .Varint = .Simple }),
+        .rx_pin = fd(3, .{ .Varint = .Simple }),
+        .instance_num = fd(4, .{ .Varint = .Simple }),
+    };
+
+    pub usingnamespace protobuf.MessageMixins(@This());
+};
+
+pub const UartWriteRequest = struct {
+    data: ManagedString = .Empty,
+    timeout_ms: u32 = 0,
+    instance_num: u32 = 0,
+
+    pub const _desc_table = .{
+        .data = fd(1, .Bytes),
+        .timeout_ms = fd(2, .{ .Varint = .Simple }),
+        .instance_num = fd(3, .{ .Varint = .Simple }),
+    };
+
+    pub usingnamespace protobuf.MessageMixins(@This());
+};
+
+pub const UartReadRequest = struct {
+    byte_count: u32 = 0,
+    timeout_ms: u32 = 0,
+    instance_num: u32 = 0,
+
+    pub const _desc_table = .{
+        .byte_count = fd(1, .{ .Varint = .Simple }),
+        .timeout_ms = fd(2, .{ .Varint = .Simple }),
+        .instance_num = fd(3, .{ .Varint = .Simple }),
+    };
+
+    pub usingnamespace protobuf.MessageMixins(@This());
+};
+
+pub const UartReadResponse = struct {
+    data: ManagedString = .Empty,
+
+    pub const _desc_table = .{
+        .data = fd(1, .Bytes),
+    };
+
+    pub usingnamespace protobuf.MessageMixins(@This());
+};
+
 pub const UsbPDWritePDORequest = struct {
     channel: u32 = 0,
     voltage_mv: u32 = 0,
     current_limit_ma: u32 = 0,
+    pdo_index: u32 = 0,
 
     pub const _desc_table = .{
         .channel = fd(1, .{ .Varint = .Simple }),
         .voltage_mv = fd(3, .{ .Varint = .Simple }),
         .current_limit_ma = fd(4, .{ .Varint = .Simple }),
+        .pdo_index = fd(5, .{ .Varint = .Simple }),
+    };
+
+    pub usingnamespace protobuf.MessageMixins(@This());
+};
+
+pub const UsbPDWritePDOResponse = struct {
+    pdo_index: u32 = 0,
+    voltage_mv: u32 = 0,
+    current_limit_ma: u32 = 0,
+
+    pub const _desc_table = .{
+        .pdo_index = fd(1, .{ .Varint = .Simple }),
+        .voltage_mv = fd(2, .{ .Varint = .Simple }),
+        .current_limit_ma = fd(3, .{ .Varint = .Simple }),
     };
 
     pub usingnamespace protobuf.MessageMixins(@This());
@@ -402,6 +472,26 @@ pub const WriteBankVoltageRequest = struct {
     pub const _desc_table = .{
         .bank = fd(1, .{ .Varint = .Simple }),
         .voltage = fd(2, .{ .Varint = .Simple }),
+    };
+
+    pub usingnamespace protobuf.MessageMixins(@This());
+};
+
+pub const SDInfoRequest = struct {
+    info: u32 = 0,
+
+    pub const _desc_table = .{
+        .info = fd(1, .{ .Varint = .Simple }),
+    };
+
+    pub usingnamespace protobuf.MessageMixins(@This());
+};
+
+pub const SDInfoResponse = struct {
+    capacity_bytes: u64 = 0,
+
+    pub const _desc_table = .{
+        .capacity_bytes = fd(1, .{ .Varint = .Simple }),
     };
 
     pub usingnamespace protobuf.MessageMixins(@This());
@@ -456,6 +546,14 @@ pub const AppMessage = struct {
         write_bank_voltage_response,
         usb_pd_read_temperature_request,
         usb_pd_read_temperature_response,
+        sd_info_request,
+        sd_info_response,
+        uart_setup_request,
+        uart_setup_response,
+        uart_read_request,
+        uart_read_response,
+        uart_write_request,
+        uart_write_response,
     };
     pub const kind_union = union(_kind_case) {
         gpio_mode_request: GPIOModeRequest,
@@ -495,7 +593,7 @@ pub const AppMessage = struct {
         firmware_info_request: FirmwareInfoRequest,
         firmware_info_response: FirmwareInfoResponse,
         refresh_screen_response: Empty,
-        usb_pd_write_pdo_response: Empty,
+        usb_pd_write_pdo_response: UsbPDWritePDOResponse,
         soft_spi_write_request: SoftSPIWriteRequest,
         soft_spi_write_response: Empty,
         gpio_mode_response: Empty,
@@ -503,6 +601,14 @@ pub const AppMessage = struct {
         write_bank_voltage_response: Empty,
         usb_pd_read_temperature_request: UsbPDReadTemperatureRequest,
         usb_pd_read_temperature_response: UsbPDReadTemperatureResponse,
+        sd_info_request: SDInfoRequest,
+        sd_info_response: SDInfoResponse,
+        uart_setup_request: UartSetupRequest,
+        uart_setup_response: Empty,
+        uart_read_request: UartReadRequest,
+        uart_read_response: UartReadResponse,
+        uart_write_request: UartWriteRequest,
+        uart_write_response: Empty,
         pub const _union_desc = .{
             .gpio_mode_request = fd(1, .{ .SubMessage = {} }),
             .emtpy = fd(2, .{ .SubMessage = {} }),
@@ -549,6 +655,14 @@ pub const AppMessage = struct {
             .write_bank_voltage_response = fd(44, .{ .SubMessage = {} }),
             .usb_pd_read_temperature_request = fd(45, .{ .SubMessage = {} }),
             .usb_pd_read_temperature_response = fd(46, .{ .SubMessage = {} }),
+            .sd_info_request = fd(47, .{ .SubMessage = {} }),
+            .sd_info_response = fd(48, .{ .SubMessage = {} }),
+            .uart_setup_request = fd(49, .{ .SubMessage = {} }),
+            .uart_setup_response = fd(50, .{ .SubMessage = {} }),
+            .uart_read_request = fd(51, .{ .SubMessage = {} }),
+            .uart_read_response = fd(52, .{ .SubMessage = {} }),
+            .uart_write_request = fd(53, .{ .SubMessage = {} }),
+            .uart_write_response = fd(54, .{ .SubMessage = {} }),
         };
     };
 
