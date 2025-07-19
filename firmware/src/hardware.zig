@@ -132,7 +132,7 @@ fn sd_init(alloc: std.mem.Allocator) !void {
         rp2xxx.gpio.num(9),
         rp2xxx.gpio.num(10),
         rp2xxx.gpio.num(11),
-        rp2xxx.gpio.num(11),
+        rp2xxx.gpio.num(8),
         rp2xxx.spi.instance.num(1),
         100_000,
     );

@@ -23,6 +23,9 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
+        .@"foundation-libc" = .{
+            .path = "lib/microzig/modules/foundation-libc",
+        },
         .microzig = .{
             .path = "lib/microzig",
         },
@@ -33,6 +36,10 @@
         .protobuf = .{ //
             .url = "https://github.com/Arwalk/zig-protobuf//archive/77161cbf10625fea90ee3bf6eee47e6b8c587845.tar.gz",
             .hash = "protobuf-2.0.0-0e82akObGwBZQtrB7Qb6CTWSrwYKRPJ0M4L0CuTJmJ9G",
+        },
+        .zfat = .{
+            .url = "git+https://github.com/ZigEmbeddedGroup/zfat/?ref=HEAD#758a50721e4aa65a3c3ac16f79e82812893f8766",
+            .hash = "zfat-0.15.0-SNNK9eTBTQCYFqn0r9wIqdynCGOxFyMAQnMOIz0GKHU7",
         },
     },
 

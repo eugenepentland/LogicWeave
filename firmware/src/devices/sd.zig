@@ -67,6 +67,12 @@ pub fn init(
     spi_inst: rp2xxx.spi.SPI,
     initial_baud_rate: u32,
 ) !SD_Driver {
+    // Configure the passed SPI instance with the initial baud rate
+    var configured_spi = spi_inst;
+    configured_spi.reset();
+
+    try configured_spi.set_baudrate(initial_baud_rate, rp2xxx.clock_config.peri.?.frequency());
+
     // Configure CS Pin for SIO (Software Input/Output) and set as output
     cs_p.set_function(.sio);
     cs_p.set_direction(.out);
@@ -77,9 +83,8 @@ pub fn init(
     mosi_p.set_function(.spi);
     miso_p.set_function(.spi);
 
-    // Configure the passed SPI instance with the initial baud rate
-    var configured_spi = spi_inst;
-    try configured_spi.set_baudrate(initial_baud_rate, rp2xxx.clock_config.peri.?.frequency());
+    try configured_spi.apply(.{ .clock_config = rp2xxx.clock_config });
+    time.sleep_us(100);
 
     // Create and return the SD_Driver instance
     const driver = SD_Driver{
@@ -117,6 +122,7 @@ fn _cs_high(self: *SD_Driver) void {
 ///   arg: The 32-bit argument for the command.
 ///   crc: The 7-bit CRC checksum for the command packet (plus MSB always 1).
 fn _send_command(self: *SD_Driver, cmd: u8, arg: u32, crc: u8) void {
+    std.log.info("Sending SD CMD {any}", .{cmd});
     var packet: [6]u8 = undefined;
     packet[0] = cmd;
     packet[1] = @intCast((arg >> 24) & 0xFF);
@@ -145,17 +151,12 @@ fn _read_response(self: *SD_Driver, length: usize, retries: usize) ![]u8 {
 
     var i: usize = 0;
     while (i < retries) {
-        var byte_read: [1]u8 = undefined;
         // Read one byte, sending 0xFF as dummy data to clock out the response
-        _ = self.spi.read_blocking(u8, 0xFF, byte_read[0..]);
-        if (byte_read[0] != 0xFF) { // Check if a valid response (not 0xFF) is received
-            response_buffer[0] = byte_read[0];
+        self.spi.read_blocking(u8, 0xFF, response_buffer[0..1]);
+        if (response_buffer[0] != 0xFF) { // Check if a valid response (not 0xFF) is received
             // If more bytes are expected, read them
             if (length > 1) {
-                for (0..length - 1) |j| {
-                    _ = self.spi.read_blocking(u8, 0xFF, byte_read[0..]);
-                    response_buffer[j] = byte_read[0];
-                }
+                self.spi.read_blocking(u8, 0xFF, response_buffer[1..]);
             }
             return response_buffer; // Return the allocated buffer
         }
@@ -176,10 +177,10 @@ fn _read_response(self: *SD_Driver, length: usize, retries: usize) ![]u8 {
 ///   `void` on success, or an `SDCardError.NoDataToken` error if the token is not received within retries.
 fn _wait_for_data_token(self: *SD_Driver, retries: usize) !void {
     var i: usize = 0;
+    var token: [1]u8 = undefined;
     while (i < retries) {
-        var token: u8 = 0xFF;
-        _ = self.spi.read_blocking(u8, &[_]u8{0xFF}, &[_]u8{&token});
-        if (token == 0xFE) { // Data Start Token
+        self.spi.read_blocking(u8, 0xFF, &token);
+        if (token[0] == 0xFE) { // Data Start Token
             return;
         }
         i += 1;
@@ -201,25 +202,28 @@ pub fn initialize(self: *SD_Driver, high_baud_rate: u32) !void {
     var dummy_bytes: [10]u8 = [_]u8{0xFF} ** 10;
     self.spi.write_blocking(u8, &dummy_bytes);
 
+    time.sleep_ms(100);
     // 2. CMD0: GO_IDLE_STATE
     // Puts the card into idle state. Expected R1 response: 0x01.
     self._cs_low();
+    self._send_command(CMD0, 0x00000000, 0x95); // CRC for CMD0 with 0 arg is 0x95
     const r1_cmd0 = try self._read_response(1, 20);
     defer self.allocator.free(r1_cmd0); // Free allocated memory
-    self._send_command(CMD0, 0x00000000, 0x95); // CRC for CMD0 with 0 arg is 0x95
     self._cs_high();
     if (r1_cmd0[0] != 0x01) {
         return SDCardError.Cmd0Failed;
     }
+
+    std.log.info("Put into idle state", .{});
 
     // 3. CMD8: SEND_IF_COND (for SDHC/SDXC detection and voltage check)
     // Checks if the card supports 2.7-3.6V and returns a check pattern.
     // Argument: 0x000001AA (VHS: 0x1 (2.7-3.6V), Check Pattern: 0xAA)
     // Expected R7 response (R1 + 4 data bytes).
     self._cs_low();
+    self._send_command(CMD8, 0x000001AA, 0x87); // CRC for CMD8 with 0x1AA arg is 0x87
     const r7_cmd8 = try self._read_response(5, 20);
     defer self.allocator.free(r7_cmd8); // Free allocated memory
-    self._send_command(CMD8, 0x000001AA, 0x87); // CRC for CMD8 with 0x1AA arg is 0x87
     self._cs_high();
     if (r7_cmd8[0] == 0x01 and r7_cmd8[1] == 0x00 and r7_cmd8[2] == 0x00 and r7_cmd8[3] == 0x01 and r7_cmd8[4] == 0xAA) {
         self.is_sdhc = true; // Card supports CMD8 and voltage, likely SDHC/SDXC
@@ -229,6 +233,8 @@ pub fn initialize(self: *SD_Driver, high_baud_rate: u32) !void {
         return SDCardError.Cmd8Failed;
     }
 
+    std.log.info("Done with cmd8", .{});
+
     // 4. ACMD41: SD_SEND_OP_COND (initialization process)
     // This command is preceded by CMD55 (APP_CMD). It's used to bring the card out of idle state.
     // Argument: HCS bit (bit 30) set for SDHC/SDXC, otherwise 0.
@@ -237,18 +243,18 @@ pub fn initialize(self: *SD_Driver, high_baud_rate: u32) !void {
     while (i < 100) { // Max 100 retries (approx 5 seconds total)
         // Send CMD55 (APP_CMD)
         self._cs_low();
+        self._send_command(CMD55, 0x00000000, 0x65); // CRC for CMD55 is 0x65
         const r1_cmd55 = try self._read_response(1, 20);
         defer self.allocator.free(r1_cmd55); // Free allocated memory
-        self._send_command(CMD55, 0x00000000, 0x65); // CRC for CMD55 is 0x65
         if (r1_cmd55[0] > 0x01) { // R1 response should be 0x00 or 0x01
             self._cs_high();
             return SDCardError.Cmd55Failed;
         }
 
         // Send ACMD41 (SD_SEND_OP_COND)
+        self._send_command(ACMD41, acmd41_arg, 0x77); // CRC for ACMD41 is 0x77
         const r1_acmd41 = try self._read_response(1, 20);
         defer self.allocator.free(r1_acmd41); // Free allocated memory
-        self._send_command(ACMD41, acmd41_arg, 0x77); // CRC for ACMD41 is 0x77
         self._cs_high();
         if (r1_acmd41[0] == 0x00) { // R1 response 0x00 indicates card is initialized
             break; // Initialization complete
@@ -264,9 +270,9 @@ pub fn initialize(self: *SD_Driver, high_baud_rate: u32) !void {
     // This bit indicates if the card is Standard Capacity (0) or High/Extended Capacity (1).
     if (self.is_sdhc) {
         self._cs_low();
+        self._send_command(CMD58, 0x00000000, 0xFD); // READ_OCR, CRC is 0xFD
         const r3_cmd58 = try self._read_response(5, 20); // R3 response: R1 + 4 data bytes (OCR)
         defer self.allocator.free(r3_cmd58); // Free allocated memory
-        self._send_command(CMD58, 0x00000000, 0xFD); // READ_OCR, CRC is 0xFD
         self._cs_high();
         if (r3_cmd58[0] != 0x00) {
             return SDCardError.Cmd58Failed;
@@ -279,9 +285,9 @@ pub fn initialize(self: *SD_Driver, high_baud_rate: u32) !void {
     // SDHC/SDXC cards always use 512-byte blocks, so this command is not needed for them.
     if (!self.is_sdhc) {
         self._cs_low();
+        self._send_command(CMD16, 512, 0x15); // SET_BLOCKLEN to 512 bytes, CRC is 0x15
         const r1_cmd16 = try self._read_response(1, 20);
         defer self.allocator.free(r1_cmd16); // Free allocated memory
-        self._send_command(CMD16, 512, 0x15); // SET_BLOCKLEN to 512 bytes, CRC is 0x15
         self._cs_high();
         if (r1_cmd16[0] != 0x00) {
             return SDCardError.Cmd16Failed;
@@ -310,8 +316,7 @@ pub fn read_csd(self: *SD_Driver) ![16]u8 {
 
     // Read 16 bytes of CSD data + 2 bytes of CRC16
     var csd_data_and_crc: [18]u8 = undefined;
-    var dummy_read_data: [18]u8 = [_]u8{0xFF} ** 18; // Dummy bytes to send during read
-    _ = self.spi.read_blocking(u8, &dummy_read_data, &csd_data_and_crc);
+    _ = self.spi.read_blocking(u8, 0xFF, &csd_data_and_crc);
     self._cs_high();
 
     var csd_raw: [16]u8 = undefined;
@@ -337,8 +342,7 @@ pub fn read_cid(self: *SD_Driver) ![16]u8 {
 
     // Read 16 bytes of CID data + 2 bytes of CRC16
     var cid_data_and_crc: [18]u8 = undefined;
-    var dummy_read_data: [18]u8 = [_]u8{0xFF} ** 18; // Dummy bytes to send during read
-    _ = self.spi.read_blocking(u8, &dummy_read_data, &cid_data_and_crc);
+    _ = self.spi.read_blocking(u8, 0xFF, &cid_data_and_crc);
     self._cs_high();
 
     var cid_raw: [16]u8 = undefined;
@@ -377,21 +381,12 @@ pub fn read_block(self: *SD_Driver, block_address: u32, block_size: usize) ![]u8
 
     // Allocate buffer for block_size bytes + 2 bytes for CRC16
     var data_and_crc_buffer = try self.allocator.alloc(u8, block_size + 2);
-    defer self.allocator.free(data_and_crc_buffer); // Ensure this is freed on error
-
-    // Create a dummy buffer of 0xFFs to send during the read operation
-    const dummy_read_data = try self.allocator.alloc(u8, block_size + 2);
-    defer self.allocator.free(dummy_read_data); // Ensure this is freed on error
-    @memset(dummy_read_data, 0xFF); // Fill with 0xFF
 
     // Perform the SPI read
-    _ = self.spi.read_blocking(u8, dummy_read_data, data_and_crc_buffer);
+    _ = self.spi.read_blocking(u8, 0xFF, data_and_crc_buffer);
     self._cs_high();
 
-    // Allocate a new slice for just the data (without CRC)
-    const data_slice = try self.allocator.alloc(u8, block_size);
-    @memcpy(data_slice, data_and_crc_buffer[0..block_size]); // Copy only the data part
-    return data_slice; // Return the data slice, caller must free it
+    return data_and_crc_buffer[0..block_size];
 }
 
 /// Writes a single data block to the SD card.
@@ -436,9 +431,9 @@ pub fn write_block(self: *SD_Driver, block_address: u32, data: []const u8) !void
     // Wait for busy signal to clear (MISO goes high)
     var i: usize = 0;
     while (i < 5000) { // ~500ms timeout for busy (5000 * 0.1ms)
-        var busy_status: u8 = 0;
-        _ = self.spi.read_blocking(u8, &[_]u8{0xFF}, &[_]u8{&busy_status});
-        if (busy_status == 0xFF) { // Card is no longer busy
+        var busy_status: [1]u8 = undefined;
+        _ = self.spi.read_blocking(u8, 0xFF, &busy_status);
+        if (busy_status[0] == 0xFF) { // Card is no longer busy
             break;
         }
         time.sleep_us(100); // 0.1ms delay for busy polling
