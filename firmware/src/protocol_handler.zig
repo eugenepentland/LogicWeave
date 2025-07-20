@@ -55,14 +55,13 @@ fn usb_cdc_write_protobuf(kind: definitions.AppMessage.kind_union, allocator: st
 // --- Main Public Handler Function ---
 pub fn handle_incoming_usb(allocator: std.mem.Allocator) void {
     const rx_data = usb_cdc_read();
+    if (rx_data.len == 0) return;
 
-    if (rx_data.len > 0) {
-        handleProto(allocator, rx_data[0..]) catch |err| {
-            var err_buff: [64]u8 = undefined;
-            const formatted_err = std.fmt.bufPrint(err_buff[0..], "{}", .{err}) catch "format error";
-            usb_cdc_write_protobuf(.{ .error_response = .{ .message = protobuf.ManagedString.managed(formatted_err) } }, allocator) catch {};
-        };
-    }
+    handleProto(allocator, rx_data[0..]) catch |err| {
+        var err_buff: [64]u8 = undefined;
+        const formatted_err = std.fmt.bufPrint(err_buff[0..], "{}", .{err}) catch "format error";
+        usb_cdc_write_protobuf(.{ .error_response = .{ .message = protobuf.ManagedString.managed(formatted_err) } }, allocator) catch {};
+    };
 }
 
 fn calculateCurrentSelect(target_ma: u32) u4 {
@@ -107,33 +106,39 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                     .updated_at = protobuf.ManagedString.managed(firmware_config.UPDATED_AT),
                 } }, allocator);
             },
-            .sd_info_request => |_| {
-                try hardware.sd.initialize(20_000_000);
-                //const capactiy_bytes = (try hardware.sd.readCSD()).capacity_bytes;
-                try usb_cdc_write_protobuf(.{ .sd_info_response = .{ .capacity_bytes = 10 } }, allocator);
+            .echo_message => |content| {
+                const message = content.message.getSlice();
+                const resp: definitions.AppMessage.kind_union = .{ .echo_message = .{ .message = protobuf.ManagedString.managed(message) } };
+                try usb_cdc_write_protobuf(resp, allocator);
             },
-            .write_text_request => |request| {
-                try hardware.g.drawString(request.text.getSlice(), @intCast(request.x), @intCast(request.y));
-                try usb_cdc_write_protobuf(.{ .write_text_response = .{ .status = 200 } }, allocator);
+            .gpio_read_request => |request| {
+                const pin = hardware.getGPIO(request.gpio_pin);
+                const state = pin.read();
+                const kind: definitions.AppMessage.kind_union = .{ .gpio_read_response = .{ .state = state != 0 } };
+                try usb_cdc_write_protobuf(kind, allocator);
             },
-            .clear_screen_request => |_| {
-                hardware.g.clear(.White);
-                try usb_cdc_write_protobuf(.{ .clear_screen_response = .{ .status = 200 } }, allocator);
+            .gpio_write_request => |request| {
+                const pin = hardware.getGPIO(request.gpio_pin);
+                pin.put(@intFromBool(request.state));
+                try usb_cdc_write_protobuf(.{ .gpio_write_response = .{ .status = 200 } }, allocator);
             },
-            .refresh_screen_request => |_| {
-                try hardware.screen.global_update(
-                    Graphics.Graphics.getRotatedBuffer(hardware.g.old_frame_buffer)[0..],
-                    Graphics.Graphics.getRotatedBuffer(hardware.g.frame_buffer)[0..],
-                    .Fast,
-                    0x19,
-                );
-                hardware.g.refreshFrameBuffer();
-                try usb_cdc_write_protobuf(.{ .refresh_screen_response = .{ .status = 200 } }, allocator);
-            },
-            .usb_pd_enable_request => |request| {
-                const pps = try hardware.getPPS(request.channel);
-                pps.enable(request.on);
-                try usb_cdc_write_protobuf(.{ .usb_pd_enable_response = .{ .status = 200 } }, allocator);
+            .gpio_mode_request => |request| {
+                const pin = hardware.getGPIO(request.gpio_pin);
+                switch (request.mode) {
+                    .input => {
+                        pin.set_function(.sio);
+                        pin.set_direction(.in);
+                    },
+                    .output => {
+                        pin.set_function(.sio);
+                        pin.set_direction(.out);
+                    },
+                    .pwm => {
+                        pin.set_function(.pwm);
+                    },
+                    else => {}, // Handle other modes if necessary, or make this an error
+                }
+                try usb_cdc_write_protobuf(.{ .gpio_mode_response = .{ .status = 200 } }, allocator);
             },
             .uart_setup_request => |request| {
                 const tx_pin = hardware.getGPIO(request.tx_pin);
@@ -165,110 +170,10 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 defer allocator.free(buff);
 
                 uart.read_blocking(buff, Duration.from_ms(@intCast(request.timeout_ms))) catch {
-                    // You need to clear UART errors before making a new transaction
                     uart.clear_errors();
                 };
                 const resp: definitions.AppMessage.kind_union = .{ .uart_read_response = .{ .data = protobuf.ManagedString.managed(buff[0..]) } };
                 try usb_cdc_write_protobuf(resp, allocator);
-            },
-            .usb_pd_write_pdo_request => |request| {
-                const pps = try hardware.getPPS(request.channel);
-
-                if (request.pdo_index > 0 and request.pdo_index < 14) {
-                    try pps.requestPDO(.{
-                        .pdo_index = @intCast(request.pdo_index),
-                        .current_select = 0x0F,
-                        .voltage_select = 0xFF,
-                    });
-
-                    try usb_cdc_write_protobuf(.{ .usb_pd_write_pdo_response = .{
-                        .pdo_index = request.pdo_index,
-                    } }, allocator);
-                    return;
-                }
-
-                // Read in all of the PDO options
-                for (1..14) |i| {
-                    const pdo = try pps.readSourcePDO(@intCast(i));
-
-                    if (pdo.is_pps()) {
-                        // Check to see if the requested voltage is within the range the pps port accepts
-                        if (request.voltage_mv > pdo.get_voltage_mv(false)) continue;
-                        if (request.voltage_mv < pdo.get_voltage_min_mv(false)) continue;
-                        if (request.current_limit_ma > pdo.get_current_ma()) continue;
-                        //if (request.voltage_mv % 100 == 0) { continue };
-                    } else {
-                        if (request.voltage_mv != pdo.get_voltage_mv(false)) continue;
-                        if (request.current_limit_ma > pdo.get_current_ma()) continue;
-                    }
-
-                    // PDO_INDEX: Use the current PDO index 'i'
-                    const pdo_index: u4 = @intCast(i);
-
-                    // VOLTAGE_SEL: Also crucial. "mV/100 for PPS, mV/200 for AVS".
-                    // Assuming for now it's a PPS PDO for simplicity, so mV/100.
-                    // You need to confirm if the PDO is PPS or AVS.
-                    const voltage_sel: u8 = @intCast(request.voltage_mv / 100); // Assuming PPS for now.
-
-                    // CURRENT_SEL: Derived from the requested current using the get_current_ma logic.
-                    // We need to find the smallest current_max_code that results in a current
-                    // equal to or greater than request.current_ma.
-                    const current_sel: u4 = calculateCurrentSelect(request.current_limit_ma);
-
-                    try pps.requestPDO(.{
-                        .pdo_index = pdo_index,
-                        .current_select = current_sel,
-                        .voltage_select = voltage_sel,
-                    });
-
-                    try usb_cdc_write_protobuf(.{ .usb_pd_write_pdo_response = .{
-                        .pdo_index = pdo_index,
-                    } }, allocator);
-
-                    return;
-                }
-
-                return error.InvalidPDRequest;
-            },
-            .usb_pd_read_pdo_request => |request| {
-                const pps = try hardware.getPPS(request.channel);
-
-                const pdo = try pps.readSourcePDO(@intCast(request.index));
-
-                try usb_cdc_write_protobuf(.{ .usb_pd_read_pdo_response = .{
-                    .voltage_mv = pdo.get_voltage_mv(false),
-                    .current_ma = pdo.get_current_ma(),
-                    .is_fixed = pdo.type == 0,
-                    .voltage_mv_min = pdo.get_voltage_min_mv(false),
-                } }, allocator);
-            },
-            .usb_pd_read_request => |request| {
-                const pps = try hardware.getPPS(request.channel);
-
-                try usb_cdc_write_protobuf(.{ .usb_pd_read_response = .{
-                    .measured_voltage_mv = try pps.readVoltageMv(),
-                    .measured_current_ma = try pps.readCurrentMa(),
-                    .requested_voltage_mv = try pps.readRequestedVoltageMv(),
-                    .requested_current_ma = try pps.readRequestedCurrentMa(),
-                    .on = pps.gate_open,
-                } }, allocator);
-            },
-            .usb_bootloader_request => |_| {
-                try usb_cdc_write_protobuf(.{ .usb_bootloader_response = .{ .status = 200 } }, allocator);
-                rp2xxx.rom.reset_usb_boot(0, 0);
-            },
-            .echo_message => |content| {
-                const message = content.message.getSlice();
-                const resp: definitions.AppMessage.kind_union = .{ .echo_message = .{ .message = protobuf.ManagedString.managed(message) } };
-                try usb_cdc_write_protobuf(resp, allocator);
-            },
-            .usb_pd_read_temperature_request => |_| {
-                const temp1 = hardware.pps1.readTemperature() catch 0;
-                const temp2 = hardware.pps1.readTemperature() catch 0;
-                try usb_cdc_write_protobuf(.{ .usb_pd_read_temperature_response = .{
-                    .temperature_ch1_c = temp1,
-                    .temperature_ch2_c = temp2,
-                } }, allocator);
             },
             .spi_setup_request => |request| {
                 const mosi_pin = hardware.getGPIO(request.mosi_pin);
@@ -313,7 +218,6 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 // 2. Loop through each byte in the data slice
                 for (data_slice) |byte_to_send| {
                     // 3. Loop through each bit in the byte, Most Significant Bit (MSB) first
-                    // FIX: Changed 'u3' to 'u4' to hold the value 8
                     var bit_index: u4 = 8;
                     while (bit_index > 0) {
                         bit_index -= 1;
@@ -336,8 +240,6 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
 
                 // 4. End the transaction by setting Chip Select high
                 cs_pin.put(1);
-
-                // --- End Bit-Banging ---
 
                 try usb_cdc_write_protobuf(.{ .soft_spi_write_response = .{ .status = 200 } }, allocator);
             },
@@ -376,6 +278,8 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 const resp: definitions.AppMessage.kind_union = .{ .spi_read_response = .{ .data = protobuf.ManagedString.managed(buff[0..]) } };
                 try usb_cdc_write_protobuf(resp, allocator);
             },
+
+            // Generic I2C functions (always included)
             .i2c_setup_request => |request| {
                 const sda_pin = hardware.getGPIO(request.sda_pin);
                 const scl_pin = hardware.getGPIO(request.scl_pin);
@@ -395,7 +299,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
             },
             .i2c_read_request => |request| {
                 var buff: []u8 = try allocator.alloc(u8, @truncate(request.byte_count));
-                defer allocator.free(buff); // Handled by ManagedString in response
+                defer allocator.free(buff);
                 const i2c_instance = rp2xxx.i2c.instance.num(@truncate(request.instance_num));
                 const device_address: u7 = @truncate(request.device_address);
 
@@ -409,41 +313,150 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 try i2c_instance.write_blocking(@enumFromInt(device_address), request.data.getSlice(), null);
                 try usb_cdc_write_protobuf(.{ .i2c_write_response = .{ .status = 200 } }, allocator);
             },
-            .gpio_read_request => |request| {
-                const pin = hardware.getGPIO(request.gpio_pin);
-                const state = pin.read();
-                const kind: definitions.AppMessage.kind_union = .{ .gpio_read_response = .{ .state = state != 0 } };
-                try usb_cdc_write_protobuf(kind, allocator);
-            },
-            .gpio_write_request => |request| {
-                const pin = hardware.getGPIO(request.gpio_pin);
-                pin.put(@intFromBool(request.state));
-                try usb_cdc_write_protobuf(.{ .gpio_write_response = .{ .status = 200 } }, allocator);
-            },
-            .gpio_mode_request => |request| {
-                const pin = hardware.getGPIO(request.gpio_pin);
-                switch (request.mode) {
-                    .input => {
-                        pin.set_function(.sio);
-                        pin.set_direction(.in);
-                    },
-                    .output => {
-                        pin.set_function(.sio);
-                        pin.set_direction(.out);
-                    },
-                    .pwm => {
-                        pin.set_function(.pwm);
-                    },
-                    else => {},
-                }
-                try usb_cdc_write_protobuf(.{ .gpio_mode_response = .{ .status = 200 } }, allocator);
-            },
-            .write_bank_voltage_request => |request| {
-                try hardware.set_bank_voltage(request.bank, request.voltage);
-                try usb_cdc_write_protobuf(.{ .write_bank_voltage_response = .{ .status = 200 } }, allocator);
-            },
+
+            // Feature-specific functions (conditionally compiled)
+            // These will only be included if GENERIC_FIRMWARE is 'false'
             else => {
-                return error.InvalidMessage;
+                if (comptime firmware_config.GENERIC) {
+                    // For the generic firmware, all other messages are invalid
+                    return error.InvalidMessage;
+                } else {
+                    // For the full-featured firmware, handle all other cases
+                    switch (kind_enum) {
+                        .sd_info_request => |_| {
+                            try hardware.sd.initialize(20_000_000);
+                            //const capactiy_bytes = (try hardware.sd.readCSD()).capacity_bytes;
+                            try usb_cdc_write_protobuf(.{ .sd_info_response = .{ .capacity_bytes = 10 } }, allocator);
+                        },
+                        .write_text_request => |request| {
+                            try hardware.g.drawString(request.text.getSlice(), @intCast(request.x), @intCast(request.y));
+                            try usb_cdc_write_protobuf(.{ .write_text_response = .{ .status = 200 } }, allocator);
+                        },
+                        .clear_screen_request => |_| {
+                            hardware.g.clear(.White);
+                            try usb_cdc_write_protobuf(.{ .clear_screen_response = .{ .status = 200 } }, allocator);
+                        },
+                        .refresh_screen_request => |_| {
+                            try hardware.screen.global_update(
+                                Graphics.Graphics.getRotatedBuffer(hardware.g.old_frame_buffer)[0..],
+                                Graphics.Graphics.getRotatedBuffer(hardware.g.frame_buffer)[0..],
+                                .Fast,
+                                0x19,
+                            );
+                            hardware.g.refreshFrameBuffer();
+                            try usb_cdc_write_protobuf(.{ .refresh_screen_response = .{ .status = 200 } }, allocator);
+                        },
+                        .usb_pd_enable_request => |request| {
+                            const pps = try hardware.getPPS(request.channel);
+                            pps.enable(request.on);
+                            try usb_cdc_write_protobuf(.{ .usb_pd_enable_response = .{ .status = 200 } }, allocator);
+                        },
+                        .usb_pd_write_pdo_request => |request| {
+                            const pps = try hardware.getPPS(request.channel);
+
+                            if (request.pdo_index > 0 and request.pdo_index < 14) {
+                                try pps.requestPDO(.{
+                                    .pdo_index = @intCast(request.pdo_index),
+                                    .current_select = 0x0F,
+                                    .voltage_select = 0xFF,
+                                });
+
+                                try usb_cdc_write_protobuf(.{ .usb_pd_write_pdo_response = .{
+                                    .pdo_index = request.pdo_index,
+                                } }, allocator);
+                                return;
+                            }
+
+                            // Read in all of the PDO options
+                            for (1..14) |i| {
+                                const pdo = try pps.readSourcePDO(@intCast(i));
+
+                                if (pdo.is_pps()) {
+                                    // Check to see if the requested voltage is within the range the pps port accepts
+                                    if (request.voltage_mv > pdo.get_voltage_mv(false)) continue;
+                                    if (request.voltage_mv < pdo.get_voltage_min_mv(false)) continue;
+                                    if (request.current_limit_ma > pdo.get_current_ma()) continue;
+                                    //if (request.voltage_mv % 100 == 0) { continue };
+                                } else {
+                                    if (request.voltage_mv != pdo.get_voltage_mv(false)) continue;
+                                    if (request.current_limit_ma > pdo.get_current_ma()) continue;
+                                }
+
+                                // PDO_INDEX: Use the current PDO index 'i'
+                                const pdo_index: u4 = @intCast(i);
+
+                                // VOLTAGE_SEL: Also crucial. "mV/100 for PPS, mV/200 for AVS".
+                                // Assuming for now it's a PPS PDO for simplicity, so mV/100.
+                                // You need to confirm if the PDO is PPS or AVS.
+                                const voltage_sel: u8 = @intCast(request.voltage_mv / 100); // Assuming PPS for now.
+
+                                // CURRENT_SEL: Derived from the requested current using the get_current_ma logic.
+                                // We need to find the smallest current_max_code that results in a current
+                                // equal to or greater than request.current_ma.
+                                const current_sel: u4 = calculateCurrentSelect(request.current_limit_ma);
+
+                                try pps.requestPDO(.{
+                                    .pdo_index = pdo_index,
+                                    .current_select = current_sel,
+                                    .voltage_select = voltage_sel,
+                                });
+
+                                try usb_cdc_write_protobuf(.{ .usb_pd_write_pdo_response = .{
+                                    .pdo_index = pdo_index,
+                                } }, allocator);
+
+                                return;
+                            }
+
+                            return error.InvalidPDRequest;
+                        },
+                        .usb_pd_read_pdo_request => |request| {
+                            const pps = try hardware.getPPS(request.channel);
+
+                            const pdo = try pps.readSourcePDO(@intCast(request.index));
+
+                            try usb_cdc_write_protobuf(.{ .usb_pd_read_pdo_response = .{
+                                .voltage_mv = pdo.get_voltage_mv(false),
+                                .current_ma = pdo.get_current_ma(),
+                                .is_fixed = pdo.type == 0,
+                                .voltage_mv_min = pdo.get_voltage_min_mv(false),
+                            } }, allocator);
+                        },
+                        .usb_pd_read_request => |request| {
+                            const pps = try hardware.getPPS(request.channel);
+
+                            try usb_cdc_write_protobuf(.{ .usb_pd_read_response = .{
+                                .measured_voltage_mv = try pps.readVoltageMv(),
+                                .measured_current_ma = try pps.readCurrentMa(),
+                                .requested_voltage_mv = try pps.readRequestedVoltageMv(),
+                                .requested_current_ma = try pps.readRequestedCurrentMa(),
+                                .on = pps.gate_open,
+                            } }, allocator);
+                        },
+                        // doesn't work currently for the rp2350
+                        .usb_bootloader_request => |_| {
+                            try usb_cdc_write_protobuf(.{ .usb_bootloader_response = .{ .status = 200 } }, allocator);
+                            rp2xxx.rom.reset_usb_boot(0, 0);
+                        },
+                        .usb_pd_read_temperature_request => |_| {
+                            const temp1 = hardware.pps1.readTemperature() catch 0;
+                            const temp2 = hardware.pps1.readTemperature() catch 0;
+                            try usb_cdc_write_protobuf(.{ .usb_pd_read_temperature_response = .{
+                                .temperature_ch1_c = temp1,
+                                .temperature_ch2_c = temp2,
+                            } }, allocator);
+                        },
+                        .write_bank_voltage_request => |request| {
+                            try hardware.set_bank_voltage(request.bank, request.voltage);
+                            try usb_cdc_write_protobuf(.{ .write_bank_voltage_response = .{ .status = 200 } }, allocator);
+                        },
+                        // If any other unhandled cases exist in the full-featured version, they would fall here.
+                        // For now, we assume all are covered or explicitly invalid.
+                        else => {
+                            return error.InvalidMessage;
+                        },
+                    }
+                }
             },
         }
     }

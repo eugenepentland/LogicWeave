@@ -12,6 +12,7 @@ const Example = struct {
     target: *const Target,
     name: []const u8,
     file: []const u8,
+    generic: bool,
 };
 
 // --- Function to Build the Flashing Executable ---
@@ -49,9 +50,9 @@ pub fn build(b: *Build) void {
     const host_target = b.standardTargetOptions(.{});
 
     // Add Foundation Libc and get its paths
-    const foundation_libc_dep = b.dependency("foundation-libc", .{});
-    const foundation_libc_include_path = foundation_libc_dep.path("zig-out/include");
-    const foundation_libc_lib_path = foundation_libc_dep.path("zig-out/lib");
+    //const foundation_libc_dep = b.dependency("foundation-libc", .{});
+    //const foundation_libc_include_path = foundation_libc_dep.path("zig-out/include");
+    //const foundation_libc_lib_path = foundation_libc_dep.path("zig-out/lib");
 
     // 2) Host‑side: protoc generation step
     const pb_host_dep = b.dependency("protobuf", .{
@@ -86,9 +87,26 @@ pub fn build(b: *Build) void {
 
     // 5) Define Firmware Examples/Targets
     const examples = [_]Example{
-        .{ .name = "main_pico2_arm", .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm, .file = "src/main.zig" },
+        .{
+            .name = "logicweave_pico2_arm",
+            .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
+            .file = "src/main.zig",
+            .generic = false,
+        },
+        .{
+            .name = "logicweave_generic_pico2_arm",
+            .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
+            .file = "src/main.zig",
+            .generic = true,
+        },
     };
 
+    const commit_hash = b.option([]const u8, "GIT_HASH", "The git commit hash") orelse blk: {
+        const stdout = b.run(&.{ "git", "rev-parse", "--short=8", "HEAD" });
+        break :blk stdout[0 .. stdout.len - 1]; // remove the \n
+    };
+    const updated_at = b.run(&.{ "git", "log", "-1", "--format=%cd" });
+    
     // 6) Build loop for firmware examples
     for (examples) |ex| {
         // a) Create firmware executable step
@@ -99,16 +117,14 @@ pub fn build(b: *Build) void {
             .root_source_file = b.path(ex.file),
         });
 
-        const commit_hash = b.option([]const u8, "GIT_HASH", "The git commit hash") orelse blk: {
-            const stdout = b.run(&.{ "git", "rev-parse", "--short=8", "HEAD" });
-            break :blk stdout[0 .. stdout.len - 1]; // remove the \n
-        };
-        const updated_at = b.run(&.{ "git", "log", "-1", "--format=%cd" });
+        // ✨ Create and add firmware-specific options dynamically ✨
+        const fw_options = b.addOptions();
+        fw_options.addOption([]const u8, "GIT_HASH", commit_hash);
+        fw_options.addOption([]const u8, "UPDATED_AT", updated_at);
+        // Use the `generic` field directly from the current example
+        fw_options.addOption(bool, "GENERIC", ex.generic);
 
-        const firmware_options = b.addOptions();
-        firmware_options.addOption([]const u8, "GIT_HASH", commit_hash);
-        firmware_options.addOption([]const u8, "UPDATED_AT", updated_at);
-        fw.add_options("firmware_config", firmware_options);
+        fw.add_options("firmware_config", fw_options);
 
         // b) Import your generated protocol definitions into the firmware application
         fw.add_app_import("protocol", proto_module, .{});
@@ -120,31 +136,6 @@ pub fn build(b: *Build) void {
             .optimize = optimize,
         });
         const pb_fw_mod = pb_fw_dep.module("protobuf");
-
-        const zfat_dep = b.dependency("zfat", .{
-            .target = zig_tgt,
-            .code_page = .us,
-            .@"sector-size" = @as(u32, 512),
-            .@"volume-count" = @as(u32, 5),
-            .find = true,
-            .mkfs = true,
-            .fastseek = true,
-            .expand = true,
-            .chmod = true,
-            .label = true,
-            .forward = true,
-            .relative_path_api = .enabled_with_getcwd,
-            .lba64 = true,
-            .use_trim = true,
-            .exfat = true,
-        });
-        const zfat_mod = zfat_dep.module("zfat");
-        fw.add_app_import("zfat", zfat_mod, .{});
-
-        // Link the main firmware against Foundation Libc
-        fw.artifact.addLibraryPath(foundation_libc_lib_path);
-        fw.artifact.linkSystemLibrary("c");
-        fw.add_system_include_path(foundation_libc_include_path);
 
         // d) Import the protobuf runtime into the firmware application
         fw.add_app_import("protobuf", pb_fw_mod, .{});

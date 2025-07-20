@@ -2,6 +2,7 @@
 const std = @import("std");
 const microzig = @import("microzig");
 const Duration = microzig.drivers.time.Duration;
+const firmware_config = @import("firmware_config");
 
 // Import our new modules
 const hardware = @import("hardware.zig");
@@ -26,44 +27,17 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noretu
 }
 
 pub fn main() !void {
-    // Enable uart logging for debugging
-    const uart_tx_pin = rp2xxx.gpio.num(32);
-    const uart = rp2xxx.uart.instance.num(0);
-
-    uart_tx_pin.set_function(.uart);
-
-    uart.apply(.{
-        .baud_rate = 115200,
-        .clock_config = rp2xxx.clock_config,
-    });
-
-    rp2xxx.uart.init_logger(uart);
-
-    // 3. Setup allocator for protocol handler
+    // 1. Setup allocator for protocol handler
     var buffer: [2048]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const allocator = fba.allocator();
 
-    std.log.info("Booting up", .{});
-
-    // 1. Initialize all hardware
-    hardware.init(allocator) catch |err| {
-        std.log.err("Hardware init failed: {}", .{err});
-        // Handle failure, maybe blink an LED
-    };
-
-    hardware.sd.initialize(20_000_000) catch |err| {
-        std.log.err("SD init failed: {}", .{err});
-    };
-
-    const csd = try hardware.sd.read_csd();
-    std.log.info("{any}", .{csd});
-
-    const data: [512]u8 = [_]u8{0x00} ** 512;
-    try hardware.sd.write_block(0, &data);
-
-    const buff = try hardware.sd.read_block(1, 512);
-    std.log.info("sd block 0 {any}", .{buff});
+    // Initalize the screen, USB PD ports, intterupts for logicweave board
+    if (comptime !firmware_config.GENERIC) {
+        hardware.init(allocator) catch |err| {
+            std.log.err("Hardware init failed: {}", .{err});
+        };
+    }
 
     // 2. Initialize the USB device
     const usb_dev = usb.Usb(.{});
@@ -80,11 +54,13 @@ pub fn main() !void {
         // Check for and handle any incoming USB commands
         protocol_handler.handle_incoming_usb(allocator);
 
-        // Periodically update the e-paper display
-        const now = time.get_time_since_boot().to_us();
-        if (now - last_update_time > 1_000_000_000) { // 1 second
-            last_update_time = now;
-            //hardware.poll_and_update_display() catch {}; // Ignore display errors
+        if (comptime !firmware_config.GENERIC) {
+            // Periodically update the e-paper display
+            const now = time.get_time_since_boot().to_us();
+            if (now - last_update_time > 1_000_000_0) {
+                last_update_time = now;
+                hardware.poll_and_update_display() catch {}; // Ignore display errors
+            }
         }
     }
 }

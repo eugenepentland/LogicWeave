@@ -144,7 +144,7 @@ pub fn init(alloc: std.mem.Allocator) !void {
     init_pd_interrupts();
     init_pwr_buttons();
     try init_gpio_bank_voltage();
-    // screen_init() catch {};
+    screen_init() catch {};
     try sd_init(alloc);
 }
 
