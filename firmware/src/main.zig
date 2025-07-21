@@ -28,7 +28,6 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noretu
 }
 
 pub fn main() !void {
-    const t =  fatfs.FileSystem = undefined;
     // 1. Setup allocator for protocol handler
     var buffer: [2048]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
@@ -39,6 +38,7 @@ pub fn main() !void {
         hardware.init(allocator) catch |err| {
             std.log.err("Hardware init failed: {}", .{err});
         };
+        hardware.poll_and_update_display() catch {}; // Ignore display errors
     }
 
     // 2. Initialize the USB device
@@ -59,7 +59,7 @@ pub fn main() !void {
         if (comptime !firmware_config.GENERIC) {
             // Periodically update the e-paper display
             const now = time.get_time_since_boot().to_us();
-            if (now - last_update_time > 1_000_000_0) {
+            if (now - last_update_time > 2_000_000) {
                 last_update_time = now;
                 hardware.poll_and_update_display() catch {}; // Ignore display errors
             }

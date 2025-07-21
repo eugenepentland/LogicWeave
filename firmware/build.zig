@@ -126,15 +126,6 @@ pub fn build(b: *Build) void {
 
         const zig_tgt = b.resolveTargetQuery(ex.target.zig_target);
 
-        // Add Foundation Libc and get its paths
-        const libc_dep = b.dependency("libc", .{
-            .target = zig_tgt,
-            .optimize = optimize,
-        });
-        //const foundation_libc_include_path = foundation_libc_dep.path("zig-out/include");
-        //const foundation_libc_lib_path = foundation_libc_dep.path("zig-out/lib");
-        const libc = libc_dep.artifact("foundation");
-
         const zfat_dep = b.dependency("zfat", .{
             .target = zig_tgt,
             .optimize = optimize,
@@ -160,9 +151,18 @@ pub fn build(b: *Build) void {
 
         const zfat_mod = zfat_dep.module("zfat");
 
-        zfat_mod.addIncludePath(libc.getEmittedIncludeTree());
+        // Add Foundation Libc and get its paths
+        const libc_dep = b.dependency("libc", .{
+            .target = zig_tgt,
+            .optimize = optimize,
+        });
+        const libc = libc_dep.artifact("foundation");
+        const tree = libc.getEmittedIncludeTree();
+
+        zfat_mod.addIncludePath(tree);
         fw.artifact.linkLibrary(libc);
-        //fw.add_app_import("zfat", zfat_mod, .{});
+
+        fw.add_app_import("zfat", zfat_mod, .{});
 
         // c) Build the protobuf *runtime* library for the firmware's target
         const pb_fw_dep = b.dependency("protobuf", .{
