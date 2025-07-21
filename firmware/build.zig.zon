@@ -23,7 +23,7 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
-        .@"foundation-libc" = .{
+        .libc = .{
             .path = "lib/microzig/modules/foundation-libc",
         },
         .microzig = .{

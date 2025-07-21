@@ -49,11 +49,6 @@ pub fn build(b: *Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const host_target = b.standardTargetOptions(.{});
 
-    // Add Foundation Libc and get its paths
-    //const foundation_libc_dep = b.dependency("foundation-libc", .{});
-    //const foundation_libc_include_path = foundation_libc_dep.path("zig-out/include");
-    //const foundation_libc_lib_path = foundation_libc_dep.path("zig-out/lib");
-
     // 2) Host‑side: protoc generation step
     const pb_host_dep = b.dependency("protobuf", .{
         .target = host_target,
@@ -106,7 +101,7 @@ pub fn build(b: *Build) void {
         break :blk stdout[0 .. stdout.len - 1]; // remove the \n
     };
     const updated_at = b.run(&.{ "git", "log", "-1", "--format=%cd" });
-    
+
     // 6) Build loop for firmware examples
     for (examples) |ex| {
         // a) Create firmware executable step
@@ -129,8 +124,47 @@ pub fn build(b: *Build) void {
         // b) Import your generated protocol definitions into the firmware application
         fw.add_app_import("protocol", proto_module, .{});
 
-        // c) Build the protobuf *runtime* library for the firmware's target
         const zig_tgt = b.resolveTargetQuery(ex.target.zig_target);
+
+        // Add Foundation Libc and get its paths
+        const libc_dep = b.dependency("libc", .{
+            .target = zig_tgt,
+            .optimize = optimize,
+        });
+        //const foundation_libc_include_path = foundation_libc_dep.path("zig-out/include");
+        //const foundation_libc_lib_path = foundation_libc_dep.path("zig-out/lib");
+        const libc = libc_dep.artifact("foundation");
+
+        const zfat_dep = b.dependency("zfat", .{
+            .target = zig_tgt,
+            .optimize = optimize,
+            .code_page = .us,
+            .@"sector-size" = @as(u32, 512),
+            .@"volume-count" = @as(u32, 5),
+            // .@"volume-names" = @as([]const u8, "a,b,c,h,z"), // TODO(fqu): Requires VolToPart to be defined
+
+            // Enable features:
+            .find = true,
+            .mkfs = true,
+            .fastseek = true,
+            .expand = true,
+            .chmod = true,
+            .label = true,
+            .forward = true,
+            .relative_path_api = .enabled_with_getcwd,
+            // .multi_partition = true, // TODO(fqu): Requires VolToPart to be defined
+            .lba64 = true,
+            .use_trim = true,
+            .exfat = true,
+        });
+
+        const zfat_mod = zfat_dep.module("zfat");
+
+        zfat_mod.addIncludePath(libc.getEmittedIncludeTree());
+        fw.artifact.linkLibrary(libc);
+        //fw.add_app_import("zfat", zfat_mod, .{});
+
+        // c) Build the protobuf *runtime* library for the firmware's target
         const pb_fw_dep = b.dependency("protobuf", .{
             .target = zig_tgt,
             .optimize = optimize,

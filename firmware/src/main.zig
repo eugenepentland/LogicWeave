@@ -3,6 +3,7 @@ const std = @import("std");
 const microzig = @import("microzig");
 const Duration = microzig.drivers.time.Duration;
 const firmware_config = @import("firmware_config");
+const fatfs = @import("zfat");
 
 // Import our new modules
 const hardware = @import("hardware.zig");
@@ -27,6 +28,7 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noretu
 }
 
 pub fn main() !void {
+    const t =  fatfs.FileSystem = undefined;
     // 1. Setup allocator for protocol handler
     var buffer: [2048]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
