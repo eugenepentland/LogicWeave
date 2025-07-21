@@ -88,12 +88,12 @@ pub fn build(b: *Build) void {
             .file = "src/main.zig",
             .generic = false,
         },
-        .{
-            .name = "logicweave_generic_pico2_arm",
-            .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
-            .file = "src/main.zig",
-            .generic = true,
-        },
+        //.{
+        //    .name = "logicweave_generic_pico2_arm",
+        //    .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
+        //    .file = "src/main.zig",
+        //    .generic = true,
+        //},
     };
 
     const commit_hash = b.option([]const u8, "GIT_HASH", "The git commit hash") orelse blk: {
@@ -133,7 +133,7 @@ pub fn build(b: *Build) void {
             .@"sector-size" = @as(u32, 512),
             .@"volume-count" = @as(u32, 5),
             // .@"volume-names" = @as([]const u8, "a,b,c,h,z"), // TODO(fqu): Requires VolToPart to be defined
-
+            .@"no-libc" = true,
             // Enable features:
             .find = true,
             .mkfs = true,
@@ -152,14 +152,16 @@ pub fn build(b: *Build) void {
         const zfat_mod = zfat_dep.module("zfat");
 
         // Add Foundation Libc and get its paths
-        const libc_dep = b.dependency("libc", .{
+        const libc_dep = b.dependency("foundation_libc", .{
             .target = zig_tgt,
             .optimize = optimize,
         });
+
         const libc = libc_dep.artifact("foundation");
         const tree = libc.getEmittedIncludeTree();
 
-        zfat_mod.addIncludePath(tree);
+        //zfat_mod.addIncludePath(tree);
+        zfat_mod.link_objects.items[0].other_step.root_module.addIncludePath(tree);
         fw.artifact.linkLibrary(libc);
 
         fw.add_app_import("zfat", zfat_mod, .{});
