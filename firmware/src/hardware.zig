@@ -59,7 +59,7 @@ fn gpio_interrupt() callconv(.c) void {
     peripherals.IO_BANK0.INTR2.modify(.{ .GPIO23_EDGE_LOW = 1 });
     peripherals.IO_BANK0.INTR3.modify(.{ .GPIO24_EDGE_LOW = 1 });
     peripherals.IO_BANK0.INTR0.modify(.{ .GPIO4_EDGE_LOW = 1 });
-    peripherals.IO_BANK0.INTR0.modify(.{ .GPIO4_EDGE_LOW = 1 });
+    peripherals.IO_BANK0.INTR0.modify(.{ .GPIO5_EDGE_LOW = 1 });
 }
 
 // --- Initialization Functions ---
@@ -143,11 +143,12 @@ fn sd_init(alloc: std.mem.Allocator) !void {
 
 // A single public init function to be called from main
 pub fn init(alloc: std.mem.Allocator) !void {
-    try pps_init();
-    init_pd_interrupts();
-    init_pwr_buttons();
-    try init_gpio_bank_voltage();
-    screen_init() catch {};
+    //try pps_init();
+    //init_pd_interrupts();
+    //init_pwr_buttons();
+    //try init_gpio_bank_voltage();
+    //screen_init() catch {};
+    interrupt.globally_disable();
     try sd_init(alloc);
 }
 

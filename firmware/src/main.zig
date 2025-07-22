@@ -20,8 +20,8 @@ pub const microzig_options = microzig.Options{
     .cpu = .{ .ram_vectors = true },
 };
 
-pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
-    std.log.err("panic: {s}", .{message});
+pub fn panic(message: []const u8, s: ?*std.builtin.StackTrace, _: ?usize) noreturn {
+    std.log.err("The RP2350 has crashed: {s}. {any}", .{ message, s });
     @breakpoint();
     rp2xxx.rom.reset_usb_boot(0, 0);
     while (true) {}
@@ -51,21 +51,21 @@ pub fn main() !void {
         hardware.init(allocator) catch |err| {
             std.log.err("Hardware init failed: {}", .{err});
         };
-        hardware.poll_and_update_display() catch {}; // Ignore display errors
+        //hardware.poll_and_update_display() catch {}; // Ignore display errors
     }
 
     try hardware.sd.initialize(20_000_000);
 
     std.log.info("Mounting FS", .{});
-    try hardware.global_fs.mount("0:", true);
-    defer fatfs.FileSystem.unmount("0:") catch |e| std.log.err("failed to unmount: {s}", .{@errorName(e)});
+    hardware.global_fs.mount("0:", true) catch std.log.info("error mounting the fs", .{});
+    defer fatfs.FileSystem.unmount("0:") catch |e| std.log.info("failed to unmount: {s}", .{@errorName(e)});
 
     // --- Read Root Directory ---
     std.log.info("Reading root directory:", .{});
-    // var root_dir = try fatfs.Dir.open("/");
-    //defer root_dir.close();
+    var root_dir = try fatfs.Dir.open("0:/");
+    defer root_dir.close();
 
-    std.log.info("Finished reading directory.", .{});
+    std.log.info("Finished opening directory.", .{});
 
     // 2. Initialize the USB device
     const usb_dev = usb.Usb(.{});

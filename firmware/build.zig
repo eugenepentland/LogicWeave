@@ -141,6 +141,7 @@ pub fn build(b: *Build) void {
             .expand = true,
             .chmod = true,
             .label = true,
+            .reentrant = false,
             .forward = true,
             .relative_path_api = .enabled_with_getcwd,
             // .multi_partition = true, // TODO(fqu): Requires VolToPart to be defined
@@ -156,6 +157,7 @@ pub fn build(b: *Build) void {
         const libc_dep = b.dependency("foundation_libc", .{
             .target = zig_tgt,
             .optimize = optimize,
+            .single_threaded = true,
         });
 
         const libc = libc_dep.artifact("foundation");

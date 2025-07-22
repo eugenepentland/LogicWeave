@@ -485,25 +485,6 @@ pub fn write_block(self: *SD_Driver, block_address: u32, data: []const u8) !void
     self._cs_high();
 }
 
-/// -- new helper to do the mount + list --
-pub fn listRoot(_: *SD_Driver) !void {
-    var fs: fatfs.FileSystem = undefined;
-    // false => don't mkfs, assume there's already a FAT32 volume
-    try fs.mount("0:", false);
-
-    const dir = try fatfs.Dir.open(&fs, "0:/");
-    defer dir.close();
-
-    while (true) {
-        const entry = try dir.read();
-        if (entry == null) break;
-        std.log.info("found root entry: {s}", .{entry.?.name});
-    }
-
-    // unmount when done
-    try fatfs.FileSystem.unmount("0:");
-}
-
 /// -- now define the Disk impl that talks to your SD_Driver under the hood:
 pub const Disk = struct {
     driver: *SD_Driver,
@@ -516,8 +497,9 @@ pub const Disk = struct {
     },
 };
 
-fn getStatus(d: *fatfs.Disk) fatfs.Disk.Status {
-    _ = d;
+fn getStatus(interface: *fatfs.Disk) fatfs.Disk.Status {
+    const self: *Disk = @fieldParentPtr("interface", interface);
+    _ = self;
     return fatfs.Disk.Status{
         .initialized = true,
         .disk_present = true,
@@ -525,9 +507,9 @@ fn getStatus(d: *fatfs.Disk) fatfs.Disk.Status {
     };
 }
 
-fn initializeDisk(d: *fatfs.Disk) fatfs.Disk.Error!fatfs.Disk.Status {
-    // no extra init beyond mount-time for SD
-    return getStatus(d);
+fn initializeDisk(interface: *fatfs.Disk) fatfs.Disk.Error!fatfs.Disk.Status {
+    const self: *Disk = @fieldParentPtr("interface", interface);
+    return getStatus(&self.interface);
 }
 
 fn readSectors(
