@@ -28,6 +28,19 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noretu
 }
 
 pub fn main() !void {
+    const uart = rp2xxx.uart.instance.num(0);
+    const baud_rate = 115200;
+    const uart_tx_pin = rp2xxx.gpio.num(32);
+    uart_tx_pin.set_function(.uart);
+
+    uart.apply(.{
+        .baud_rate = baud_rate,
+        .clock_config = rp2xxx.clock_config,
+    });
+
+    rp2xxx.uart.init_logger(uart);
+
+    std.log.info("booting up", .{});
     // 1. Setup allocator for protocol handler
     var buffer: [2048]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
@@ -40,6 +53,19 @@ pub fn main() !void {
         };
         hardware.poll_and_update_display() catch {}; // Ignore display errors
     }
+
+    try hardware.sd.initialize(20_000_000);
+
+    std.log.info("Mounting FS", .{});
+    try hardware.global_fs.mount("0:", true);
+    defer fatfs.FileSystem.unmount("0:") catch |e| std.log.err("failed to unmount: {s}", .{@errorName(e)});
+
+    // --- Read Root Directory ---
+    std.log.info("Reading root directory:", .{});
+    // var root_dir = try fatfs.Dir.open("/");
+    //defer root_dir.close();
+
+    std.log.info("Finished reading directory.", .{});
 
     // 2. Initialize the USB device
     const usb_dev = usb.Usb(.{});

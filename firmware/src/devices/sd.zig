@@ -3,6 +3,7 @@ const microzig = @import("microzig");
 const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
 const gpio = rp2xxx.gpio;
+const fatfs = @import("zfat");
 
 // Define custom errors for SD card operations
 pub const SDCardError = error{
@@ -32,6 +33,8 @@ miso_pin: gpio.Pin,
 sclk_pin: gpio.Pin,
 spi: rp2xxx.spi.SPI, // Store the configured SPI instance
 is_sdhc: bool, // Flag to indicate if the card is SDHC/SDXC
+sector_count: u32 = 0, // Add this field
+disk: Disk,
 
 // SD Card Command Definitions (as per SD Physical Layer Simplified Specification)
 const CMD0 = 0x40; // GO_IDLE_STATE (Software reset)
@@ -87,7 +90,7 @@ pub fn init(
     time.sleep_us(100);
 
     // Create and return the SD_Driver instance
-    const driver = SD_Driver{
+    var driver = SD_Driver{
         .allocator = alloc,
         .cs_pin = cs_p,
         .sclk_pin = sclk_p,
@@ -95,7 +98,14 @@ pub fn init(
         .miso_pin = miso_p,
         .spi = configured_spi,
         .is_sdhc = false, // This flag will be determined during the initialization process
+        .disk = Disk{ .driver = undefined }, // we'll fill this next
     };
+
+    // after you've initialized the rest:
+    driver.disk.driver = &driver;
+
+    // tell ZFAT about our physical disk:
+    fatfs.disks[0] = &driver.disk.interface;
 
     return driver;
 }
@@ -294,7 +304,35 @@ pub fn initialize(self: *SD_Driver, high_baud_rate: u32) !void {
         }
     }
 
-    // 7. Increase SPI baud rate for faster data transfer.
+    // 7. Read CSD and calculate sector count
+    const csd = try self.read_csd();
+    // CSD_STRUCTURE is bits 127:126 of the CSD register
+    const csd_structure = (csd[0] >> 6) & 0b11;
+
+    if (self.is_sdhc and csd_structure == 1) { // CSD Version 2.0 for SDHC/SDXC
+        // C_SIZE is bits 69:48
+        const c_size = (@as(u32, csd[7] & 0x3F) << 16) | (@as(u32, csd[8]) << 8) | @as(u32, csd[9]);
+        self.sector_count = (c_size + 1) * 1024;
+    } else if (!self.is_sdhc and csd_structure == 0) { // CSD Version 1.0 for SDSC
+        // READ_BL_LEN is bits 83:80
+        const read_bl_len = csd[5] & 0x0F;
+        // C_SIZE is bits 73:62
+        const c_size = (@as(u32, csd[6] & 0x03) << 10) | (@as(u32, csd[7]) << 2) | (@as(u32, csd[8] >> 6));
+        // C_SIZE_MULT is bits 49:47
+        const c_size_mult = (@as(u32, (csd[9] & 0x03)) << 1) | @as(u32, csd[10] >> 7);
+
+        const block_len: u64 = @as(u64, 1) << @as(u6, @intCast(read_bl_len));
+        const mult: u64 = @as(u64, 1) << (@as(u6, @intCast(c_size_mult)) + 2);
+        const block_nr: u64 = c_size + 1;
+        const capacity_bytes: u64 = block_nr * mult * block_len;
+        self.sector_count = @intCast(capacity_bytes / 512);
+    } else {
+        // Unsupported CSD version or mismatch
+        return SDCardError.Cmd9Failed;
+    }
+    std.log.info("SD card detected with {d} sectors.", .{self.sector_count});
+
+    // 8. Increase SPI baud rate for faster data transfer.
     try self.spi.set_baudrate(high_baud_rate, rp2xxx.clock_config.peri.?.frequency());
 }
 
@@ -445,4 +483,110 @@ pub fn write_block(self: *SD_Driver, block_address: u32, data: []const u8) !void
     }
 
     self._cs_high();
+}
+
+/// -- new helper to do the mount + list --
+pub fn listRoot(_: *SD_Driver) !void {
+    var fs: fatfs.FileSystem = undefined;
+    // false => don't mkfs, assume there's already a FAT32 volume
+    try fs.mount("0:", false);
+
+    const dir = try fatfs.Dir.open(&fs, "0:/");
+    defer dir.close();
+
+    while (true) {
+        const entry = try dir.read();
+        if (entry == null) break;
+        std.log.info("found root entry: {s}", .{entry.?.name});
+    }
+
+    // unmount when done
+    try fatfs.FileSystem.unmount("0:");
+}
+
+/// -- now define the Disk impl that talks to your SD_Driver under the hood:
+pub const Disk = struct {
+    driver: *SD_Driver,
+    interface: fatfs.Disk = fatfs.Disk{
+        .getStatusFn = getStatus,
+        .initializeFn = initializeDisk,
+        .readFn = readSectors,
+        .writeFn = writeSectors,
+        .ioctlFn = ioctl,
+    },
+};
+
+fn getStatus(d: *fatfs.Disk) fatfs.Disk.Status {
+    _ = d;
+    return fatfs.Disk.Status{
+        .initialized = true,
+        .disk_present = true,
+        .write_protected = false,
+    };
+}
+
+fn initializeDisk(d: *fatfs.Disk) fatfs.Disk.Error!fatfs.Disk.Status {
+    // no extra init beyond mount-time for SD
+    return getStatus(d);
+}
+
+fn readSectors(
+    d: *fatfs.Disk,
+    buff: [*]u8,
+    sector: fatfs.LBA,
+    count: c_uint,
+) fatfs.Disk.Error!void {
+    const self: *Disk = @fieldParentPtr("interface", d);
+    const sector_size: u32 = 512;
+    var off: u32 = 0;
+    for (0..count) |i| {
+        const addr: u32 = @intCast(sector + i);
+        const data = self.driver.read_block(addr, sector_size) catch |err| {
+            // Log the specific error for debugging, then return a generic one.
+            std.log.err("sd read error: {s}", .{@errorName(err)});
+            return fatfs.Disk.Error.DiskNotReady;
+        };
+        defer self.driver.allocator.free(data);
+        std.mem.copyForwards(u8, buff[off .. off + sector_size], data);
+        off += sector_size;
+    }
+    return;
+}
+
+fn writeSectors(
+    d: *fatfs.Disk,
+    buff: [*]const u8,
+    sector: fatfs.LBA,
+    count: c_uint,
+) fatfs.Disk.Error!void {
+    const self: *Disk = @fieldParentPtr("interface", d);
+    const sector_size: u32 = 512;
+    var off: u32 = 0;
+    for (0..count) |i| {
+        const addr: u32 = @intCast(sector + i);
+        self.driver.write_block(addr, buff[off .. off + sector_size]) catch |err| {
+            // Log the specific error for debugging, then return a generic one.
+            std.log.err("sd write error: {s}", .{@errorName(err)});
+            return fatfs.Disk.Error.DiskNotReady;
+        };
+        off += sector_size;
+    }
+    return;
+}
+
+fn ioctl(
+    d: *fatfs.Disk,
+    cmd: fatfs.IoCtl,
+    buff: [*]u8,
+) fatfs.Disk.Error!void {
+    const self: *Disk = @fieldParentPtr("interface", d);
+    switch (cmd) {
+        .sync => {},
+        .get_sector_count => {
+            // Use the sector_count from the driver
+            @as(*align(1) fatfs.LBA, @ptrCast(buff)).* = self.driver.sector_count;
+        },
+        else => return fatfs.Disk.Error.InvalidParameter,
+    }
+    return;
 }

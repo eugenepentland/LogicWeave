@@ -147,6 +147,7 @@ pub fn build(b: *Build) void {
             .lba64 = true,
             .use_trim = true,
             .exfat = true,
+            .@"static-rtc" = @as([]const u8, "2025-07-22"),
         });
 
         const zfat_mod = zfat_dep.module("zfat");

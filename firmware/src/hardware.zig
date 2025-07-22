@@ -6,6 +6,7 @@ const PPS = @import("devices/ap33772s.zig");
 const Graphics = @import("graphics.zig");
 const definitions = @import("proto_gen/all.pb.zig"); // For BankVoltage enum
 const SD = @import("devices/sd.zig");
+const fatfs = @import("zfat");
 
 const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
@@ -19,6 +20,8 @@ pub var pps1: PPS = undefined;
 pub var pps2: PPS = undefined;
 pub var screen: Screen = undefined;
 pub var sd: SD.SD_Driver = undefined;
+pub var sd_disk: SD.SdCardDisk = undefined;
+pub var global_fs: fatfs.FileSystem = undefined;
 
 // --- Constants ---
 const N_PIXELS = 128;
