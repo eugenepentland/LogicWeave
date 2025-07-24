@@ -42,7 +42,7 @@ pub fn main() !void {
 
     std.log.info("booting up", .{});
     // 1. Setup allocator for protocol handler
-    var buffer: [2048]u8 = undefined;
+    var buffer: [4096]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const allocator = fba.allocator();
 
@@ -55,17 +55,15 @@ pub fn main() !void {
     }
 
     try hardware.sd.initialize(20_000_000);
+    rp2xxx.time.sleep_ms(100);
 
-    std.log.info("Mounting FS", .{});
-    hardware.global_fs.mount("0:", true) catch std.log.info("error mounting the fs", .{});
-    defer fatfs.FileSystem.unmount("0:") catch |e| std.log.info("failed to unmount: {s}", .{@errorName(e)});
+    //var disk_buff: [2048]u8 = undefined;
+    // tell ZFAT about our physical disk:
+    fatfs.disks[0] = &hardware.sd.disk.interface;
 
-    // --- Read Root Directory ---
-    std.log.info("Reading root directory:", .{});
-    var root_dir = try fatfs.Dir.open("0:/");
-    defer root_dir.close();
-
-    std.log.info("Finished opening directory.", .{});
+    const result = try hardware.sd.read_block(1, 512);
+    std.log.info("Read block 0 {any}", .{result});
+    //try hardware.global_fs.mount("0:", true);
 
     // 2. Initialize the USB device
     const usb_dev = usb.Usb(.{});

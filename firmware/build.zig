@@ -131,7 +131,7 @@ pub fn build(b: *Build) void {
             .optimize = optimize,
             .code_page = .us,
             .@"sector-size" = @as(u32, 512),
-            .@"volume-count" = @as(u32, 5),
+            .@"volume-count" = @as(u32, 1),
             // .@"volume-names" = @as([]const u8, "a,b,c,h,z"), // TODO(fqu): Requires VolToPart to be defined
             .@"no-libc" = true,
             // Enable features:
