@@ -15,7 +15,7 @@ const time = rp2xxx.time;
 const usb = rp2xxx.usb;
 
 pub const microzig_options = microzig.Options{
-    .log_level = .debug,
+    .log_level = .info,
     .logFn = rp2xxx.uart.logFn,
     .cpu = .{ .ram_vectors = true },
 };
@@ -57,13 +57,23 @@ pub fn main() !void {
     try hardware.sd.initialize(20_000_000);
     rp2xxx.time.sleep_ms(100);
 
-    //var disk_buff: [2048]u8 = undefined;
     // tell ZFAT about our physical disk:
-    fatfs.disks[0] = &hardware.sd.disk.interface;
+    fatfs.disks[0] = &hardware.sd.interface;
 
-    const result = try hardware.sd.read_block(1, 512);
-    std.log.info("Read block 0 {any}", .{result});
-    //try hardware.global_fs.mount("0:", true);
+    try hardware.global_fs.mount("0:", true);
+    defer fatfs.FileSystem.unmount("0:") catch |e| std.log.err("failed to unmount filesystem: {s}", .{@errorName(e)});
+
+    var dir = try fatfs.Dir.open("0:/");
+    defer dir.close();
+
+    std.log.info("Files in root directory:", .{});
+
+    // Iterate through the directory contents
+    while (try dir.next()) |file_info| {
+        // file_info.fname is a null-terminated C array ([:0]u8)
+        // You might need to convert it to a Zig slice or use std.mem.span
+        std.log.info("- {s}", .{file_info.name()});
+    }
 
     // 2. Initialize the USB device
     const usb_dev = usb.Usb(.{});

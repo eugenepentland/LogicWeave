@@ -26,6 +26,7 @@ pub const SDCardError = error{
 
 pub const SD_Driver = @This();
 var response_buffer: [8]u8 = undefined;
+var block_buffer: [514]u8 = undefined;
 
 allocator: std.mem.Allocator,
 cs_pin: gpio.Pin,
@@ -35,7 +36,7 @@ sclk_pin: gpio.Pin,
 spi: rp2xxx.spi.SPI, // Store the configured SPI instance
 is_sdhc: bool, // Flag to indicate if the card is SDHC/SDXC
 sector_count: u32 = 0, // Add this field
-disk: Disk,
+interface: fatfs.Disk, // The fatfs.Disk interface is now part of SD_Driver
 
 // SD Card Command Definitions (as per SD Physical Layer Simplified Specification)
 const CMD0 = 0x40; // GO_IDLE_STATE (Software reset)
@@ -91,7 +92,7 @@ pub fn init(
     time.sleep_us(100);
 
     // Create and return the SD_Driver instance
-    var driver = SD_Driver{
+    const driver = SD_Driver{
         .allocator = alloc,
         .cs_pin = cs_p,
         .sclk_pin = sclk_p,
@@ -99,11 +100,15 @@ pub fn init(
         .miso_pin = miso_p,
         .spi = configured_spi,
         .is_sdhc = false, // This flag will be determined during the initialization process
-        .disk = Disk{ .driver = undefined }, // we'll fill this next
+        .sector_count = 0, // Will be updated during initialization
+        .interface = fatfs.Disk{ // Initialize the fatfs.Disk interface
+            .getStatusFn = getStatus,
+            .initializeFn = initializeDisk,
+            .readFn = readSectors,
+            .writeFn = writeSectors,
+            .ioctlFn = ioctl,
+        },
     };
-
-    // after you've initialized the rest:
-    driver.disk.driver = &driver;
 
     return driver;
 }
@@ -164,7 +169,7 @@ fn _read_response(self: *SD_Driver, length: usize, retries: usize) ![]u8 {
         if (response_buffer[0] != 0xFF) { // Check if a valid response (not 0xFF) is received
             // If more bytes are expected, read them
             if (length > 1) {
-                self.spi.read_blocking(u8, 0xFF, response_buffer[1..]);
+                self.spi.read_blocking(u8, 0xFF, response_buffer[1..length]);
             }
             return response_buffer[0..length]; // Return the allocated buffer
         }
@@ -181,17 +186,15 @@ fn _read_response(self: *SD_Driver, length: usize, retries: usize) ![]u8 {
 ///
 /// Returns:
 ///   `void` on success, or an `SDCardError.NoDataToken` error if the token is not received within retries.
-fn _wait_for_data_token(self: *SD_Driver, retries: usize) !void {
+fn _wait_for_data_token(self: *SD_Driver, retries: usize) !u8 {
     var i: usize = 0;
     var token: [1]u8 = undefined;
     while (i < retries) {
         self.spi.read_blocking(u8, 0xFF, &token);
-        if (token[0] == 0xFE) { // Data Start Token
-            return;
-        }
+        if (token[0] != 0xFF) return token[0];
         i += 1;
     }
-    return SDCardError.NoDataToken; // Data token not received
+    return SDCardError.NoDataToken;
 }
 
 /// Executes the full SD card initialization sequence.
@@ -332,19 +335,23 @@ pub fn initialize(self: *SD_Driver, high_baud_rate: u32) !void {
 ///   A 16-byte array containing the raw CSD data, or an `SDCardError` on failure.
 pub fn read_csd(self: *SD_Driver) ![16]u8 {
     self._cs_low();
-    self._send_command(CMD9, 0x00000000, 0xAF); // SEND_CSD, CRC is 0xAF
+    defer self._cs_high(); // Add defer here
+
+    self._send_command(CMD9, 0x00000000, 0xAF);
     const r1 = try self._read_response(1, 20);
     if (r1[0] != 0x00) {
-        self._cs_high();
         return SDCardError.Cmd9Failed;
     }
 
-    try self._wait_for_data_token(1000); // Wait for data token (0xFE)
+    const token = try self._wait_for_data_token(20000);
+    if (token != 0xFE) {
+        std.log.err("Unexpected token: 0x{x}", .{token});
+        return SDCardError.NoDataToken;
+    }
 
     // Read 16 bytes of CSD data + 2 bytes of CRC16
     var csd_data_and_crc: [18]u8 = undefined;
     _ = self.spi.read_blocking(u8, 0xFF, &csd_data_and_crc);
-    self._cs_high();
 
     var csd_raw: [16]u8 = undefined;
     @memcpy(&csd_raw, csd_data_and_crc[0..16]); // Copy only the 16 CSD bytes
@@ -357,10 +364,10 @@ pub fn read_csd(self: *SD_Driver) ![16]u8 {
 ///   A 16-byte array containing the raw CID data, or an `SDCardError` on failure.
 pub fn read_cid(self: *SD_Driver) ![16]u8 {
     self._cs_low();
+    defer self._cs_high();
     self._send_command(CMD10, 0x00000000, 0xEF); // SEND_CID, CRC is 0xEF
     const r1 = try self._read_response(1, 20);
     if (r1[0] != 0x00) {
-        self._cs_high();
         return SDCardError.Cmd10Failed;
     }
 
@@ -369,11 +376,21 @@ pub fn read_cid(self: *SD_Driver) ![16]u8 {
     // Read 16 bytes of CID data + 2 bytes of CRC16
     var cid_data_and_crc: [18]u8 = undefined;
     _ = self.spi.read_blocking(u8, 0xFF, &cid_data_and_crc);
-    self._cs_high();
 
     var cid_raw: [16]u8 = undefined;
     @memcpy(&cid_raw, cid_data_and_crc[0..16]); // Copy only the 16 CID bytes
     return cid_raw;
+}
+
+fn _wait_while_busy(self: *SD_Driver, retries: usize) !void {
+    var i: usize = 0;
+    var busy_byte: [1]u8 = undefined;
+    while (i < retries) {
+        self.spi.read_blocking(u8, 0xFF, &busy_byte);
+        if (busy_byte[0] == 0xFF) return; // Card ready
+        i += 1;
+    }
+    return SDCardError.CardBusyTimeout;
 }
 
 /// Reads a single data block from the SD card.
@@ -388,49 +405,35 @@ pub fn read_cid(self: *SD_Driver) ![16]u8 {
 ///   The caller is responsible for freeing the allocated memory for the returned slice.
 pub fn read_block(self: *SD_Driver, block_address: u32, block_size: usize) ![]u8 {
     if (block_size == 0) {
-        return SDCardError.InvalidDataLength; // Prevent zero-length allocation
+        return SDCardError.InvalidDataLength;
     }
     std.log.info("Reading block {d} with size {d}", .{ block_address, block_size });
+    // Convert to byte address for SDSC cards
+    const arg: u32 = if (self.is_sdhc)
+        block_address
+    else
+        block_address * 512;
 
     self._cs_low();
-    // CMD17 argument is the block address.
-    // For SDHC/SDXC, this is directly the block number.
-    // For SDSC, if CMD16 has set block length to 512, it's also the block number.
-    self._send_command(CMD17, block_address, 0x29); // READ_SINGLE_BLOCK, CRC is 0x29
+    defer self._cs_high();
+
+    self._send_command(CMD17, arg, 0x29); // Use converted address
     const r1 = try self._read_response(1, 20);
-    if (r1[0] != 0x00) {
-        self._cs_high();
-        return SDCardError.Cmd17Failed;
+    if (r1[0] != 0x00) return SDCardError.Cmd17Failed;
+
+    // ADD THIS: Wait for card to be ready
+    try self._wait_while_busy(20000);
+
+    const token = try self._wait_for_data_token(20000);
+    if (token != 0xFE) {
+        std.log.err("Unexpected token: 0x{x}", .{token});
+        return SDCardError.NoDataToken;
     }
-    std.log.info("Got r1 {any}", .{r1});
-    try self._wait_for_data_token(1000); // Wait for data token (0xFE)
     std.log.info("done waiting for data token", .{});
-    // Allocate buffer for block_size bytes + 2 bytes for CRC16
-    var data_and_crc_buffer: [514]u8 = undefined;
 
-    // Perform the SPI read
-    _ = self.spi.read_blocking(u8, 0xFF, &data_and_crc_buffer);
-    self._cs_high();
+    _ = self.spi.read_blocking(u8, 0xFF, &block_buffer);
 
-    return data_and_crc_buffer[0..block_size];
-}
-
-fn calculate_crc16(data: []const u8) u16 {
-    var crc: u16 = 0x0000; // Initial CRC value for CCITT-X.25
-    const polynomial: u16 = 0x1021; // X^16 + X^12 + X^5 + 1
-
-    for (data) |byte| {
-        crc ^= @as(u16, @intCast(byte)) << 8; // XOR with the next byte shifted
-        var i: u8 = 0;
-        while (i < 8) : (i += 1) { // Process each bit
-            if ((crc & 0x8000) != 0) { // If MSB is 1
-                crc = (crc << 1) ^ polynomial; // Shift and XOR with polynomial
-            } else {
-                crc <<= 1; // Just shift
-            }
-        }
-    }
-    return crc;
+    return block_buffer[0..block_size];
 }
 
 /// Writes a single data block to the SD card.
@@ -496,30 +499,26 @@ pub fn write_block(self: *SD_Driver, block_address: u32, data: []const u8) !void
         return SDCardError.CardBusyTimeout;
     }
 }
-/// -- now define the Disk impl that talks to your SD_Driver under the hood:
-pub const Disk = struct {
-    driver: *SD_Driver,
-    interface: fatfs.Disk = fatfs.Disk{
-        .getStatusFn = getStatus,
-        .initializeFn = initializeDisk,
-        .readFn = readSectors,
-        .writeFn = writeSectors,
-        .ioctlFn = ioctl,
-    },
-};
+
+// SD_Driver now directly implements the fatfs.Disk interface functions
 
 fn getStatus(_: *fatfs.Disk) fatfs.Disk.Status {
+    // Cast the fatfs.Disk pointer back to SD_Driver pointer
+    //_ : *SD_Driver = @fieldParentPtr("interface", d);
     std.log.info("Running getStatus!", .{});
     return fatfs.Disk.Status{
-        .initialized = true,
+        .initialized = true, // Assuming the driver has been initialized
         .disk_present = true,
         .write_protected = false,
     };
 }
 
-fn initializeDisk(interface: *fatfs.Disk) fatfs.Disk.Error!fatfs.Disk.Status {
+fn initializeDisk(d: *fatfs.Disk) fatfs.Disk.Error!fatfs.Disk.Status {
+    // Cast the fatfs.Disk pointer back to SD_Driver pointer
+    const self: *SD_Driver = @fieldParentPtr("interface", d);
     std.log.info("Running init disk!", .{});
-    const self: *Disk = @fieldParentPtr("interface", interface);
+    // The actual SD card initialization happens in SD_Driver.initialize
+    // This function just returns the status for the FATFS layer.
     return getStatus(&self.interface);
 }
 
@@ -529,13 +528,14 @@ fn readSectors(
     sector: fatfs.LBA,
     count: c_uint,
 ) fatfs.Disk.Error!void {
-    std.log.info("Running read sector!", .{});
-    const self: *Disk = @fieldParentPtr("interface", d);
+    // Cast the fatfs.Disk pointer back to SD_Driver pointer
+    const self: *SD_Driver = @fieldParentPtr("interface", d);
+    std.log.info("Running read sector! Sector: {d}, Count: {d}", .{ sector, count });
     const sector_size: u32 = 512;
     var off: u32 = 0;
     for (0..count) |i| {
         const addr: u32 = @intCast(sector + i);
-        const data = self.driver.read_block(addr, sector_size) catch |err| {
+        const data = self.read_block(addr, sector_size) catch |err| {
             // Log the specific error for debugging, then return a generic one.
             std.log.err("sd read error: {s}", .{@errorName(err)});
             return fatfs.Disk.Error.DiskNotReady;
@@ -547,18 +547,20 @@ fn readSectors(
 }
 
 fn writeSectors(
-    interface: *fatfs.Disk,
+    d: *fatfs.Disk,
     buff: [*]const u8,
     sector: fatfs.LBA,
     count: c_uint,
 ) fatfs.Disk.Error!void {
-    std.log.info("Running write sector! count {d}", .{count});
-    const self: *Disk = @fieldParentPtr("interface", interface);
+    // Cast the fatfs.Disk pointer back to SD_Driver pointer
+    const self: *SD_Driver = @fieldParentPtr("interface", d);
+    std.log.info("Running write sector! Sector: {d}, Count: {d}", .{ sector, count });
     const sector_size: u32 = 512;
     var off: u32 = 0;
     for (0..count) |i| {
         const addr: u32 = @intCast(sector + i);
-        self.driver.write_block(addr, buff[off .. off + sector_size]) catch |err| {
+
+        self.write_block(addr, buff[off .. off + sector_size]) catch |err| {
             // Log the specific error for debugging, then return a generic one.
             std.log.err("sd write error: {s}", .{@errorName(err)});
             return fatfs.Disk.Error.DiskNotReady;
@@ -568,16 +570,16 @@ fn writeSectors(
     return;
 }
 
-// In src/devices/sd.zig
-
-pub fn ioctl(interface: *fatfs.Disk, cmd: fatfs.IoCtl, buff: [*]u8) fatfs.Disk.Error!void {
-    const self: *Disk = @fieldParentPtr("interface", interface);
-    std.log.info("Running ioctl! with {d} sectors", .{self.driver.sector_count});
+pub fn ioctl(d: *fatfs.Disk, cmd: fatfs.IoCtl, buff: [*]u8) fatfs.Disk.Error!void {
+    // Cast the fatfs.Disk pointer back to SD_Driver pointer
+    const self: *SD_Driver = @fieldParentPtr("interface", d);
+    std.log.info("Running ioctl! with {d} sectors", .{self.sector_count});
 
     switch (cmd) {
         .sync => {},
         .get_sector_count => {
-            @as(*align(1) fatfs.LBA, @ptrCast(buff)).* = 61067264; //61067264;
+            // Return the actual sector count determined during SD card initialization
+            @as(*align(1) fatfs.LBA, @ptrCast(buff)).* = self.sector_count;
         },
         else => {
             std.log.err("invalid ioctl: {}", .{cmd});
