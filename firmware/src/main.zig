@@ -28,18 +28,6 @@ pub fn panic(message: []const u8, s: ?*std.builtin.StackTrace, _: ?usize) noretu
 }
 
 pub fn main() !void {
-    const uart = rp2xxx.uart.instance.num(0);
-    const baud_rate = 115200;
-    const uart_tx_pin = rp2xxx.gpio.num(32);
-    uart_tx_pin.set_function(.uart);
-
-    uart.apply(.{
-        .baud_rate = baud_rate,
-        .clock_config = rp2xxx.clock_config,
-    });
-
-    rp2xxx.uart.init_logger(uart);
-
     std.log.info("booting up", .{});
     // 1. Setup allocator for protocol handler
     var buffer: [4096]u8 = undefined;
@@ -51,7 +39,7 @@ pub fn main() !void {
         hardware.init(allocator) catch |err| {
             std.log.err("Hardware init failed: {}", .{err});
         };
-        //hardware.poll_and_update_display() catch {}; // Ignore display errors
+        hardware.poll_and_update_display() catch {}; // Ignore display errors
     }
 
     try hardware.sd.initialize(20_000_000);
