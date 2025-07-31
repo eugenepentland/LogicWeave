@@ -27,6 +27,9 @@ pub var global_fs: fatfs.FileSystem = undefined;
 const N_PIXELS = 128;
 const M_PIXELS = 248;
 const TOTAL_BYTES_PER_FRAME = (N_PIXELS * M_PIXELS) / 8;
+var last_trigger_time: u64 = 0;
+const DEBOUCE_TIME_US: u64 = 2.5e4;
+pub var pps1_gate_pressed = false;
 
 const pps1_ctrl_btn = rp2xxx.gpio.num(23);
 const pps2_ctrl_btn = rp2xxx.gpio.num(24);
@@ -38,28 +41,35 @@ fn gpio_interrupt() callconv(.c) void {
 
     const intr2_status = peripherals.IO_BANK0.INTR2.read();
     if (intr2_status.GPIO23_EDGE_LOW == 1) {
-        pps1.toggle();
+        defer peripherals.IO_BANK0.INTR2.modify(.{ .GPIO23_EDGE_LOW = 1 });
+        const current_time = time.get_time_since_boot().to_us();
+        if ((current_time - last_trigger_time) > DEBOUCE_TIME_US) {
+            pps1_gate_pressed = true;
+        }
+        last_trigger_time = current_time;
     }
 
     const intr3_status = peripherals.IO_BANK0.INTR3.read();
-    if (intr3_status.GPIO24_EDGE_LOW == 1) {
-        pps2.toggle();
+    if (intr3_status.GPIO24_EDGE_HIGH == 1) {
+        defer peripherals.IO_BANK0.INTR3.modify(.{ .GPIO24_EDGE_HIGH = 1 });
+        const current_time = time.get_time_since_boot().to_us();
+        if ((current_time - last_trigger_time) > DEBOUCE_TIME_US) {
+            pps2.toggle();
+        }
+        last_trigger_time = current_time;
     }
 
     const int_status = peripherals.IO_BANK0.INTR0.read();
     if (int_status.GPIO4_EDGE_LOW == 1) {
+        defer peripherals.IO_BANK0.INTR0.modify(.{ .GPIO4_EDGE_LOW = 1 });
         pps1.enable(false);
         pps1.configureProtections(PPS.DEFAULT_CONFIG) catch {};
     }
     if (int_status.GPIO5_EDGE_LOW == 1) {
+        defer peripherals.IO_BANK0.INTR0.modify(.{ .GPIO5_EDGE_LOW = 1 });
         pps2.enable(false);
         pps2.configureProtections(PPS.DEFAULT_CONFIG) catch {};
     }
-
-    peripherals.IO_BANK0.INTR2.modify(.{ .GPIO23_EDGE_LOW = 1 });
-    peripherals.IO_BANK0.INTR3.modify(.{ .GPIO24_EDGE_LOW = 1 });
-    peripherals.IO_BANK0.INTR0.modify(.{ .GPIO4_EDGE_LOW = 1 });
-    peripherals.IO_BANK0.INTR0.modify(.{ .GPIO5_EDGE_LOW = 1 });
 }
 
 // --- Initialization Functions ---
@@ -76,9 +86,6 @@ fn init_pwr_buttons() void {
 
     peripherals.IO_BANK0.PROC0_INTE2.modify(.{ .GPIO23_EDGE_LOW = 1 });
     peripherals.IO_BANK0.PROC0_INTE3.modify(.{ .GPIO24_EDGE_LOW = 1 });
-    interrupt.enable(.IO_IRQ_BANK0);
-    interrupt.globally_enable();
-    _ = interrupt.set_handler(.IO_IRQ_BANK0, .{ .c = gpio_interrupt });
 }
 
 fn init_pd_interrupts() void {
@@ -143,12 +150,16 @@ fn sd_init(alloc: std.mem.Allocator) !void {
 
 // A single public init function to be called from main
 pub fn init(alloc: std.mem.Allocator) !void {
-    //try pps_init();
+    try pps_init();
     //init_pd_interrupts();
-    //init_pwr_buttons();
-    //try init_gpio_bank_voltage();
-    //screen_init() catch {};
+    init_pwr_buttons();
+    try init_gpio_bank_voltage();
+    screen_init() catch {};
     try sd_init(alloc);
+
+    interrupt.enable(.IO_IRQ_BANK0);
+    interrupt.globally_enable();
+    _ = interrupt.set_handler(.IO_IRQ_BANK0, .{ .c = gpio_interrupt });
 }
 
 // --- Public Hardware Control Functions ---

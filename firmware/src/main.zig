@@ -42,7 +42,7 @@ pub fn main() !void {
         hardware.poll_and_update_display() catch {}; // Ignore display errors
     }
 
-    try hardware.sd.initialize(20_000_000);
+    //try hardware.sd.initialize(20_000_000);
 
     // 2. Initialize the USB device
     const usb_dev = usb.Usb(.{});
@@ -65,6 +65,11 @@ pub fn main() !void {
             if (now - last_update_time > 2_000_000) {
                 last_update_time = now;
                 hardware.poll_and_update_display() catch {}; // Ignore display errors
+            }
+
+            if (hardware.pps1_gate_pressed) {
+                hardware.pps1.toggle();
+                hardware.pps1_gate_pressed = false;
             }
         }
     }
