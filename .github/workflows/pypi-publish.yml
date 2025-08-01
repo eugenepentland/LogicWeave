@@ -23,9 +23,9 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install build and twine
-        run: python -m pip install --upgrade build twine
+      - name: Install build, twine, and tomli
         # This step doesn't require a working directory as it's a global install
+        run: python -m pip install --upgrade build twine tomli
 
       - name: Check for New Version and Publish
         env:
