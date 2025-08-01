@@ -1,0 +1,73 @@
+# This workflow publishes a Python package to PyPI when the version
+# in pyproject.toml is updated and pushed to the main branch.
+
+name: Publish to PyPI
+
+on:
+  # Trigger the workflow on pushes to the 'main' branch
+  push:
+    branches:
+      - main
+    paths:
+      - 'pyproject.toml' # Only run if pyproject.toml changes
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install build and twine
+        run: python -m pip install --upgrade build twine
+
+      - name: Check for New Version and Publish
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          set -e
+
+          # Extract the version from pyproject.toml using a Python script
+          CURRENT_VERSION=$(python -c "
+          import tomli
+          with open('pyproject.toml', 'rb') as f:
+            pyproject = tomli.load(f)
+          print(pyproject['project']['version'])
+          ")
+
+          # Your package name, updated from your link.
+          PACKAGE_NAME="logic-weave"
+          PYPI_URL="https://pypi.org/pypi/${PACKAGE_NAME}/json"
+
+          # Get the latest version from PyPI's JSON API
+          PYPI_VERSION=$(curl -s ${PYPI_URL} | python -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              print(data['info']['version'])
+          except (json.JSONDecodeError, KeyError):
+              print('0.0.0') # Set a default low version if not found
+          ")
+
+          echo "Current local version: $CURRENT_VERSION"
+          echo "Latest PyPI version: $PYPI_VERSION"
+
+          # Use version comparison to decide whether to publish
+          if [ "$CURRENT_VERSION" != "$PYPI_VERSION" ]; then
+            echo "New version detected. Building and publishing..."
+
+            # Build the source distribution and wheel
+            python -m build
+
+            # Use Twine to upload the package to PyPI
+            twine upload dist/*
+            
+            echo "Successfully published version $CURRENT_VERSION to PyPI."
+          else
+            echo "No new version detected. Skipping deployment."
+          fi
