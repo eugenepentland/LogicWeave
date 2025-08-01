@@ -9,7 +9,7 @@ on:
     branches:
       - main
     paths:
-      - 'pyproject.toml' # Only run if pyproject.toml changes
+      - 'software/pyproject.toml' # Only run if pyproject.toml changes in the software/ directory
 
 jobs:
   deploy:
@@ -25,10 +25,14 @@ jobs:
 
       - name: Install build and twine
         run: python -m pip install --upgrade build twine
+        # This step doesn't require a working directory as it's a global install
 
       - name: Check for New Version and Publish
         env:
           PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        # The working-directory parameter ensures all subsequent commands
+        # run from the software/ folder.
+        working-directory: ./software
         run: |
           set -e
 
