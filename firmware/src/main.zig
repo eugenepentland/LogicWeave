@@ -27,6 +27,18 @@ pub fn panic(message: []const u8, s: ?*std.builtin.StackTrace, _: ?usize) noretu
     while (true) {}
 }
 
+fn core1() void {
+    //var last_update_time: u64 = time.get_time_since_boot().to_us();
+    hardware.pps_init() catch {};
+    hardware.screen_init() catch {};
+
+    while (true) {
+        hardware.poll_and_update_display() catch {}; // Ignore display errors
+    }
+}
+
+var stack: [256]u32 = undefined;
+
 pub fn main() !void {
     std.log.info("booting up", .{});
     // 1. Setup allocator for protocol handler
@@ -39,8 +51,9 @@ pub fn main() !void {
         hardware.init(allocator) catch |err| {
             std.log.err("Hardware init failed: {}", .{err});
         };
-        hardware.poll_and_update_display() catch {}; // Ignore display errors
+        //hardware.poll_and_update_display() catch {}; // Ignore display errors
     }
+    rp2xxx.multicore.launch_core1_with_stack(core1, &stack);
 
     //try hardware.sd.initialize(20_000_000);
 
@@ -48,8 +61,6 @@ pub fn main() !void {
     const usb_dev = usb.Usb(.{});
     usb_dev.init_clk();
     usb_dev.init_device(&usb_cfg.DEVICE_CONFIGURATION) catch unreachable;
-
-    var last_update_time: u64 = time.get_time_since_boot().to_us();
 
     // 4. Main loop
     while (true) {
@@ -60,20 +71,14 @@ pub fn main() !void {
         protocol_handler.handle_incoming_usb(allocator);
 
         if (comptime !firmware_config.GENERIC) {
-            // Periodically update the e-paper display
-            const now = time.get_time_since_boot().to_us();
-            if (now - last_update_time > 1_500_000) {
-                last_update_time = now;
-                hardware.poll_and_update_display() catch {}; // Ignore display errors
-            }
-
+            // Check if the buttons have been pressed
             if (hardware.pps1_btn_pressed) {
                 hardware.pps1.toggle();
-                hardware.pps1_gate_pressed = false;
+                hardware.pps1_btn_pressed = false;
             }
 
             if (hardware.pps2_btn_pressed) {
-                hardware.pps1.toggle();
+                hardware.pps2.toggle();
                 hardware.pps2_btn_pressed = false;
             }
         }

@@ -116,12 +116,12 @@ fn init_gpio_bank_voltage() !void {
     try set_bank_voltage(3, .V3P3);
 }
 
-fn pps_init() !void {
+pub fn pps_init() !void {
     pps1 = try PPS.init(0, 1, 6, rp2xxx.i2c.instance.num(0));
     pps2 = try PPS.init(2, 3, 7, rp2xxx.i2c.instance.num(1));
 }
 
-fn screen_init() !void {
+pub fn screen_init() !void {
     screen = try Screen.init(
         rp2xxx.gpio.num(17),
         rp2xxx.gpio.num(18),
@@ -151,11 +151,10 @@ fn sd_init(alloc: std.mem.Allocator) !void {
 
 // A single public init function to be called from main
 pub fn init(alloc: std.mem.Allocator) !void {
-    try pps_init();
     init_pd_interrupts();
     init_pwr_buttons();
     try init_gpio_bank_voltage();
-    screen_init() catch {};
+
     try sd_init(alloc);
 
     interrupt.enable(.IO_IRQ_BANK0);
