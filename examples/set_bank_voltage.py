@@ -7,6 +7,6 @@ with LogicWeave() as lw:
     lw.write_bank_voltage(3, BankVoltage.V5P0)
 
     # Set GPIO 30, 37 and 41 high, all different banks
-    for i in [30,37,41]:
+    for i in [30, 37, 41]:
         gpio = lw.gpio(i)
         gpio.write(True)

@@ -6,7 +6,7 @@ with LogicWeave() as lw:
 
     ch2 = lw.pd_channel(2)
 
-    ch1.request_power(12000, 1000)
+    ch1.request_power(voltage_mv=12000, current_limit_ma=1000)
 
     ch1.enable_output(True)
 
