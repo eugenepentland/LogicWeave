@@ -62,14 +62,19 @@ pub fn main() !void {
         if (comptime !firmware_config.GENERIC) {
             // Periodically update the e-paper display
             const now = time.get_time_since_boot().to_us();
-            if (now - last_update_time > 2_000_000) {
+            if (now - last_update_time > 1_500_000) {
                 last_update_time = now;
                 hardware.poll_and_update_display() catch {}; // Ignore display errors
             }
 
-            if (hardware.pps1_gate_pressed) {
+            if (hardware.pps1_btn_pressed) {
                 hardware.pps1.toggle();
                 hardware.pps1_gate_pressed = false;
+            }
+
+            if (hardware.pps2_btn_pressed) {
+                hardware.pps1.toggle();
+                hardware.pps2_btn_pressed = false;
             }
         }
     }
