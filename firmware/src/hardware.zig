@@ -28,7 +28,7 @@ const N_PIXELS = 128;
 const M_PIXELS = 248;
 const TOTAL_BYTES_PER_FRAME = (N_PIXELS * M_PIXELS) / 8;
 var last_trigger_time: u64 = 0;
-const DEBOUCE_TIME_US: u64 = 2.5e4;
+const DEBOUCE_TIME_US: u64 = 25e4;
 pub var pps1_btn_pressed = false;
 pub var pps2_btn_pressed = false;
 
@@ -46,8 +46,8 @@ fn gpio_interrupt() callconv(.c) void {
         const current_time = time.get_time_since_boot().to_us();
         if ((current_time - last_trigger_time) > DEBOUCE_TIME_US) {
             pps1_btn_pressed = true;
+            last_trigger_time = current_time;
         }
-        last_trigger_time = current_time;
     }
 
     const intr3_status = peripherals.IO_BANK0.INTR3.read();
@@ -56,8 +56,8 @@ fn gpio_interrupt() callconv(.c) void {
         const current_time = time.get_time_since_boot().to_us();
         if ((current_time - last_trigger_time) > DEBOUCE_TIME_US) {
             pps2_btn_pressed = true;
+            last_trigger_time = current_time;
         }
-        last_trigger_time = current_time;
     }
 
     const int_status = peripherals.IO_BANK0.INTR0.read();
@@ -154,7 +154,8 @@ pub fn init(alloc: std.mem.Allocator) !void {
     init_pd_interrupts();
     init_pwr_buttons();
     try init_gpio_bank_voltage();
-
+    pps_init() catch {};
+    screen_init() catch {};
     try sd_init(alloc);
 
     interrupt.enable(.IO_IRQ_BANK0);

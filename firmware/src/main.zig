@@ -29,8 +29,6 @@ pub fn panic(message: []const u8, s: ?*std.builtin.StackTrace, _: ?usize) noretu
 
 fn core1() void {
     //var last_update_time: u64 = time.get_time_since_boot().to_us();
-    hardware.pps_init() catch {};
-    hardware.screen_init() catch {};
 
     while (true) {
         hardware.poll_and_update_display() catch {}; // Ignore display errors
