@@ -51,7 +51,7 @@ pub fn main() !void {
         };
         //hardware.poll_and_update_display() catch {}; // Ignore display errors
     }
-    rp2xxx.multicore.launch_core1_with_stack(core1, &stack);
+    //rp2xxx.multicore.launch_core1_with_stack(core1, &stack);
 
     //try hardware.sd.initialize(20_000_000);
 
