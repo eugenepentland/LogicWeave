@@ -446,6 +446,12 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                                 .temperature_ch2_c = temp2,
                             } }, allocator);
                         },
+                        .log_messages_request => |request| {
+                            const fname = request.filename.getSlice();
+                            std.mem.copyForwards(u8, hardware.log_filename_slice, fname);
+
+                            hardware.log_commands = request.enabled;
+                        },
                         .write_bank_voltage_request => |request| {
                             try hardware.set_bank_voltage(request.bank, request.voltage);
                             try usb_cdc_write_protobuf(.{ .write_bank_voltage_response = .{ .status = 200 } }, allocator);
