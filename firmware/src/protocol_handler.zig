@@ -515,9 +515,4 @@ fn createFileAndClearContents(path: [:0]const u8) !void {
 
     // Truncate the file to a size of zero, clearing its contents.
     try file.truncate();
-
-    // Now, write new content to the blank file.
-    try file.writer().writeAll("This file now contains only this text.");
-
-    std.debug.print("File '{s}' was cleared and new content was written.\n", .{path});
 }
