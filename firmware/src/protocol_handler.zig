@@ -5,6 +5,7 @@ const definitions = @import("proto_gen/all.pb.zig");
 const protobuf = @import("protobuf");
 const firmware_config = @import("firmware_config");
 const Graphics = @import("graphics.zig");
+const fatfs = @import("zfat");
 
 // Import our new modules
 const hardware = @import("hardware.zig");
@@ -66,7 +67,29 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator) void {
     // Log the data to a file if enabled
     if (comptime !firmware_config.GENERIC) {
         if (!hardware.log_commands) return;
-        
+        if (hardware.log_filename_slice.len == 0) return;
+
+        // init the SD card (currently has to be done every time)
+        hardware.sd.initialize(8_000_000) catch return;
+
+        // Check if the filename exists
+        const filepath = std.fmt.allocPrintZ(allocator, "0:/{s}.bin", .{hardware.log_filename_slice}) catch return;
+        defer allocator.free(filepath);
+
+        var file = fatfs.File.open(filepath, .{
+            .mode = .open_append,
+            .access = .read_write,
+        }) catch return;
+
+        defer file.close();
+
+        const message_length: u8 = @intCast(rx_data[0..].len);
+
+        // Write the length of the message
+        file.writer().writeAll(&[_]u8{message_length}) catch return;
+
+        // Write the message
+        file.writer().writeAll(rx_data[0..]) catch return;
     }
 }
 
@@ -455,8 +478,16 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                         .log_messages_request => |request| {
                             const fname = request.filename.getSlice();
                             std.mem.copyForwards(u8, hardware.log_filename_slice, fname);
-
                             hardware.log_commands = request.enabled;
+
+                            // init the SD card (currently has to be done every time)
+                            hardware.sd.initialize(8_000_000) catch return;
+
+                            // Check if the filename exists
+                            const filepath = try std.fmt.allocPrintZ(allocator, "0:/{s}.bin", .{hardware.log_filename_slice});
+                            defer allocator.free(filepath);
+
+                            try createFileAndClearContents(filepath);
                         },
                         .write_bank_voltage_request => |request| {
                             try hardware.set_bank_voltage(request.bank, request.voltage);
@@ -472,4 +503,21 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
             },
         }
     }
+}
+
+fn createFileAndClearContents(path: [:0]const u8) !void {
+    // Open the file. If it doesn't exist, it will be created.
+    var file = try fatfs.File.open(path, .{
+        .mode = .open_always,
+        .access = .read_write,
+    });
+    defer file.close();
+
+    // Truncate the file to a size of zero, clearing its contents.
+    try file.truncate();
+
+    // Now, write new content to the blank file.
+    try file.writer().writeAll("This file now contains only this text.");
+
+    std.debug.print("File '{s}' was cleared and new content was written.\n", .{path});
 }
