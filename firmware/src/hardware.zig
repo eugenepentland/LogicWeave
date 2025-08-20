@@ -22,6 +22,9 @@ pub var screen: Screen = undefined;
 pub var sd: SD.SD_Driver = undefined;
 pub var sd_disk: SD.SdCardDisk = undefined;
 pub var global_fs: fatfs.FileSystem = undefined;
+pub var log_commands: bool = false;
+pub var log_filename_buffer: [32]u8 = undefined;
+pub var log_filename_slice: []u8 = log_filename_buffer[0..];
 
 // --- Constants ---
 const N_PIXELS = 128;

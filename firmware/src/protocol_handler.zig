@@ -62,6 +62,12 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator) void {
         const formatted_err = std.fmt.bufPrint(err_buff[0..], "{}", .{err}) catch "format error";
         usb_cdc_write_protobuf(.{ .error_response = .{ .message = protobuf.ManagedString.managed(formatted_err) } }, allocator) catch {};
     };
+
+    // Log the data to a file if enabled
+    if (comptime !firmware_config.GENERIC) {
+        if (!hardware.log_commands) return;
+        
+    }
 }
 
 fn calculateCurrentSelect(target_ma: u32) u4 {

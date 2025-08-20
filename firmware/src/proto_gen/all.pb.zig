@@ -497,6 +497,18 @@ pub const SDInfoResponse = struct {
     pub usingnamespace protobuf.MessageMixins(@This());
 };
 
+pub const LogMessagesRequest = struct {
+    filename: ManagedString = .Empty,
+    enabled: bool = false,
+
+    pub const _desc_table = .{
+        .filename = fd(1, .String),
+        .enabled = fd(2, .{ .Varint = .Simple }),
+    };
+
+    pub usingnamespace protobuf.MessageMixins(@This());
+};
+
 pub const AppMessage = struct {
     kind: ?kind_union,
 
@@ -554,6 +566,8 @@ pub const AppMessage = struct {
         uart_read_response,
         uart_write_request,
         uart_write_response,
+        log_messages_request,
+        log_messages_response,
     };
     pub const kind_union = union(_kind_case) {
         gpio_mode_request: GPIOModeRequest,
@@ -609,6 +623,8 @@ pub const AppMessage = struct {
         uart_read_response: UartReadResponse,
         uart_write_request: UartWriteRequest,
         uart_write_response: Empty,
+        log_messages_request: LogMessagesRequest,
+        log_messages_response: Empty,
         pub const _union_desc = .{
             .gpio_mode_request = fd(1, .{ .SubMessage = {} }),
             .emtpy = fd(2, .{ .SubMessage = {} }),
@@ -663,6 +679,8 @@ pub const AppMessage = struct {
             .uart_read_response = fd(52, .{ .SubMessage = {} }),
             .uart_write_request = fd(53, .{ .SubMessage = {} }),
             .uart_write_response = fd(54, .{ .SubMessage = {} }),
+            .log_messages_request = fd(55, .{ .SubMessage = {} }),
+            .log_messages_response = fd(56, .{ .SubMessage = {} }),
         };
     };
 

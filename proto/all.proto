@@ -213,6 +213,11 @@ message SDInfoResponse {
   uint64 capacity_bytes = 1;
 }
 
+message LogMessagesRequest {
+  string filename = 1;
+  bool enabled = 2;
+}
+
 message AppMessage {
   oneof kind {
     GPIOModeRequest gpio_mode_request = 1;
@@ -268,5 +273,7 @@ message AppMessage {
     UartReadResponse uart_read_response = 52;
     UartWriteRequest uart_write_request = 53;
     Empty uart_write_response = 54;
+    LogMessagesRequest log_messages_request = 55;
+    Empty log_messages_response = 56;
   }
 }
