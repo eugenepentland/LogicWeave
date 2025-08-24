@@ -88,12 +88,18 @@ pub fn build(b: *Build) void {
             .file = "src/main.zig",
             .generic = false,
         },
-        //.{
-        //    .name = "logicweave_generic_pico2_arm",
-        //    .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
-        //    .file = "src/main.zig",
-        //    .generic = true,
-        //},
+        .{
+            .name = "logicweave_generic_pico2_arm",
+            .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
+            .file = "src/main.zig",
+            .generic = true,
+        },
+        .{
+            .name = "logicweave_generic_pico_arm",
+            .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
+            .file = "src/main.zig",
+            .generic = true,
+        },
     };
 
     const commit_hash = b.option([]const u8, "GIT_HASH", "The git commit hash") orelse blk: {
