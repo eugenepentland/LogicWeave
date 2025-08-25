@@ -96,7 +96,7 @@ pub fn build(b: *Build) void {
         },
         .{
             .name = "logicweave_generic_pico_arm",
-            .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
+            .target = mb.ports.rp2xxx.boards.raspberrypi.pico,
             .file = "src/main.zig",
             .generic = true,
         },
