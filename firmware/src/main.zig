@@ -4,6 +4,8 @@ const microzig = @import("microzig");
 const Duration = microzig.drivers.time.Duration;
 const firmware_config = @import("firmware_config");
 const fatfs = @import("zfat");
+const menu = @import("menu.zig");
+const Graphics = @import("graphics.zig");
 
 // Import our new modules
 const hardware = @import("hardware.zig");
@@ -49,7 +51,7 @@ pub fn main() !void {
         hardware.init(allocator) catch |err| {
             std.log.err("Hardware init failed: {}", .{err});
         };
-        //hardware.poll_and_update_display() catch {}; // Ignore display errors
+        try hardware.poll_and_update_display();
     }
     //rp2xxx.multicore.launch_core1_with_stack(core1, &stack);
 
@@ -59,7 +61,8 @@ pub fn main() !void {
     const usb_dev = usb.Usb(.{});
     usb_dev.init_clk();
     usb_dev.init_device(&usb_cfg.DEVICE_CONFIGURATION) catch unreachable;
-
+    //try hardware.poll_and_update_display();
+    //try menu.render_menu();
     // 4. Main loop
     while (true) {
         // Poll for USB events
@@ -67,18 +70,5 @@ pub fn main() !void {
 
         // Check for and handle any incoming USB commands
         protocol_handler.handle_incoming_usb(allocator);
-
-        if (comptime !firmware_config.GENERIC) {
-            // Check if the buttons have been pressed
-            if (hardware.pps1_btn_pressed) {
-                hardware.pps1.toggle();
-                hardware.pps1_btn_pressed = false;
-            }
-
-            if (hardware.pps2_btn_pressed) {
-                hardware.pps2.toggle();
-                hardware.pps2_btn_pressed = false;
-            }
-        }
     }
 }

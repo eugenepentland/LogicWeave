@@ -48,8 +48,8 @@ fn gpio_interrupt() callconv(.c) void {
         defer peripherals.IO_BANK0.INTR2.modify(.{ .GPIO23_EDGE_LOW = 1 });
         const current_time = time.get_time_since_boot().to_us();
         if ((current_time - last_trigger_time) > DEBOUCE_TIME_US) {
-            pps1_btn_pressed = true;
             last_trigger_time = current_time;
+            pps1.toggle();
         }
     }
 
@@ -58,8 +58,8 @@ fn gpio_interrupt() callconv(.c) void {
         defer peripherals.IO_BANK0.INTR3.modify(.{ .GPIO24_EDGE_HIGH = 1 });
         const current_time = time.get_time_since_boot().to_us();
         if ((current_time - last_trigger_time) > DEBOUCE_TIME_US) {
-            pps2_btn_pressed = true;
             last_trigger_time = current_time;
+            pps2.toggle();
         }
     }
 
