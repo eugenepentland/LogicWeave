@@ -140,6 +140,13 @@ pub fn screen_init() !void {
     g.refreshFrameBuffer();
 }
 
+pub fn update_screen() !void {
+    const rotated_new_slice = Graphics.Graphics.getRotatedBuffer(g.frame_buffer);
+    const rotated_old_slice = Graphics.Graphics.getRotatedBuffer(g.old_frame_buffer);
+    try screen.global_update(&rotated_old_slice, &rotated_new_slice, .Fast, 0x19);
+    g.refreshFrameBuffer();
+}
+
 fn sd_init(alloc: std.mem.Allocator) !void {
     sd = try SD.SD_Driver.init(
         alloc,
@@ -158,7 +165,7 @@ pub fn init(alloc: std.mem.Allocator) !void {
     init_pwr_buttons();
     try init_gpio_bank_voltage();
     pps_init() catch {};
-    screen_init() catch {};
+    try screen_init();
     try sd_init(alloc);
 
     interrupt.enable(.IO_IRQ_BANK0);

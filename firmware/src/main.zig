@@ -40,7 +40,6 @@ fn core1() void {
 var stack: [256]u32 = undefined;
 
 pub fn main() !void {
-    std.log.info("booting up", .{});
     // 1. Setup allocator for protocol handler
     var buffer: [4096]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
@@ -51,8 +50,11 @@ pub fn main() !void {
         hardware.init(allocator) catch |err| {
             std.log.err("Hardware init failed: {}", .{err});
         };
-        try hardware.poll_and_update_display();
+        //try hardware.poll_and_update_display();
     }
+
+    try hardware.g.drawString("Something different", 5, 25);
+    try hardware.update_screen();
     //rp2xxx.multicore.launch_core1_with_stack(core1, &stack);
 
     //try hardware.sd.initialize(20_000_000);
