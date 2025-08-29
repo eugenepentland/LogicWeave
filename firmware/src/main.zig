@@ -50,21 +50,14 @@ pub fn main() !void {
         hardware.init(allocator) catch |err| {
             std.log.err("Hardware init failed: {}", .{err});
         };
-        //try hardware.poll_and_update_display();
+        try menu.render_menu();
     }
-
-    try hardware.g.drawString("Something different", 5, 25);
-    try hardware.update_screen();
-    //rp2xxx.multicore.launch_core1_with_stack(core1, &stack);
-
-    //try hardware.sd.initialize(20_000_000);
 
     // 2. Initialize the USB device
     const usb_dev = usb.Usb(.{});
     usb_dev.init_clk();
     usb_dev.init_device(&usb_cfg.DEVICE_CONFIGURATION) catch unreachable;
-    //try hardware.poll_and_update_display();
-    //try menu.render_menu();
+
     // 4. Main loop
     while (true) {
         // Poll for USB events

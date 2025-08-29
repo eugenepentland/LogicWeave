@@ -46,9 +46,8 @@ pub var Menu: MenuSystem = .{
 pub fn render_menu() !void {
     hardware.g.clear(.White);
     for (Menu.current_menu.children, 0..) |menu, i| {
-        const y_pos: u16 = @as(u16, @intCast(i)) * 25 + 5;
+        const y_pos: u16 = @as(u16, @intCast(i)) * 30 + 5;
         try hardware.g.drawString(menu.name, 5, y_pos);
     }
-    try hardware.screen.global_update(Graphics.Graphics.getRotatedBuffer(hardware.g.old_frame_buffer)[0..], Graphics.Graphics.getRotatedBuffer(hardware.g.frame_buffer)[0..], .Fast, 25);
-    hardware.g.refreshFrameBuffer();
+    try hardware.update_screen();
 }
