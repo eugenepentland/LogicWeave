@@ -217,7 +217,7 @@ fn _bitbang_recv_byte(self: *@This()) u8 {
 /// CoG shutdown function (mirrors C++ EPD_Driver::COG_powerOff)
 pub fn cog_power_off(self: *@This()) void {
     self._sendCommandData8(0x02);
-    self.wait_for_busy_high(3000);
+    self.wait_for_busy_high();
     self.dc_pin.put(0);
     self.cs_pin.put(0);
     time.sleep_ms(150);
@@ -273,14 +273,14 @@ pub fn global_update(
 
 // ---------- PROTECTED/PRIVATE FUNCTIONS -----------
 
-fn wait_for_busy_high(self: *@This(), timeout_ms: u16) !void {
+fn wait_for_busy_high(self: *@This()) !void {
     const sleep_time_ms = 1;
     var count: u16 = 0;
     while (self.busy_pin.read() == 0) {
         time.sleep_ms(sleep_time_ms); // Small delay to prevent hard spinning
         count += 1;
 
-        if ((count * sleep_time_ms) >= timeout_ms) {
+        if ((count * sleep_time_ms) >= 5000) {
             return error.BusyCheckTimeout;
         }
     }
@@ -322,12 +322,12 @@ fn _sendCommandData8(self: *@This(), index: u8) void {
 
 fn _soft_reset(self: *@This()) !void {
     self._sendCommandData(0x00, 0x0E);
-    try self.wait_for_busy_high(3000);
+    try self.wait_for_busy_high();
 }
 
 fn _display_refresh(self: *@This()) !void {
     self._sendCommandData8(0x12);
-    try self.wait_for_busy_high(3000);
+    try self.wait_for_busy_high();
 }
 
 fn _reset(self: *@This(), ms1: u32, ms2: u32, ms3: u32, ms4: u32, ms5: u32) void {
@@ -344,5 +344,5 @@ fn _reset(self: *@This(), ms1: u32, ms2: u32, ms3: u32, ms4: u32, ms5: u32) void
 
 fn _dcdc_power_on(self: *@This()) !void {
     self._sendCommandData8(0x04);
-    try self.wait_for_busy_high(3000);
+    try self.wait_for_busy_high();
 }
