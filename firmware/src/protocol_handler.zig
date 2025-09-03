@@ -121,6 +121,18 @@ fn calculateCurrentSelect(target_ma: u32) u4 {
     return current_sel;
 }
 
+pub fn milliTo1dpFixed4(milli: u32) [4]u8 {
+    const whole = milli / 1000; // assume whole < 100
+    const tenths = (milli % 1000) / 100; // 0..9
+
+    var out: [4]u8 = undefined;
+    out[0] = '0' + @as(u8, @intCast(whole / 10));
+    out[1] = '0' + @as(u8, @intCast(whole % 10));
+    out[2] = '.';
+    out[3] = '0' + @as(u8, @intCast(tenths));
+    return out;
+}
+
 fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
     const msg = try protobuf.pb_decode(definitions.AppMessage, input, allocator);
     defer msg.deinit();
@@ -434,11 +446,11 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
 
                             // Give an error saying you are just above the current limit
                             if (voltage_match) {
-                                const errmsg = try std.fmt.allocPrint(allocator, "Current limit set too high. Set to {d}mV {d}mA but the max is {d}mV {d}mA", .{
-                                    request.voltage_mv,
-                                    request.current_limit_ma,
-                                    request.voltage_mv,
-                                    max_current_ma,
+                                const errmsg = try std.fmt.allocPrint(allocator, "Current limit set too high. Set to {s}V {s}A but the max is {s}V {s}A", .{
+                                    &milliTo1dpFixed4(request.voltage_mv),
+                                    &milliTo1dpFixed4(request.current_limit_ma),
+                                    &milliTo1dpFixed4(request.voltage_mv),
+                                    &milliTo1dpFixed4(max_current_ma),
                                 });
                                 defer allocator.free(errmsg);
                                 try usb_cdc_write_protobuf(.{ .error_response = .{
