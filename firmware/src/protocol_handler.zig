@@ -382,41 +382,36 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                         },
                         .usb_pd_write_pdo_request => |request| {
                             const pps = try hardware.getPPS(request.channel);
-
-                            if (request.pdo_index > 0 and request.pdo_index < 14) {
-                                try pps.requestPDO(.{
-                                    .pdo_index = @intCast(request.pdo_index),
-                                    .current_select = 0x0F,
-                                    .voltage_select = 0xFF,
-                                });
-
-                                try usb_cdc_write_protobuf(.{ .usb_pd_write_pdo_response = .{
-                                    .pdo_index = request.pdo_index,
-                                } }, allocator);
-                                return;
-                            }
+                            var voltage_match = false;
+                            var has_pps = false;
+                            var max_current_ma: u32 = 0;
 
                             // Read in all of the PDO options
                             for (1..14) |i| {
                                 const pdo = try pps.readSourcePDO(@intCast(i));
 
                                 if (pdo.is_pps()) {
+                                    has_pps = true;
                                     // Check to see if the requested voltage is within the range the pps port accepts
                                     if (request.voltage_mv > pdo.get_voltage_mv(false)) continue;
                                     if (request.voltage_mv < pdo.get_voltage_min_mv(false)) continue;
-                                    if (request.current_limit_ma > pdo.get_current_ma()) continue;
-                                    //if (request.voltage_mv % 100 == 0) { continue };
+                                    //if (request.current_limit_ma > pdo.get_current_ma()) continue;
+                                    if (request.voltage_mv % 100 == 0) continue;
                                 } else {
                                     if (request.voltage_mv != pdo.get_voltage_mv(false)) continue;
-                                    if (request.current_limit_ma > pdo.get_current_ma()) continue;
                                 }
+
+                                voltage_match = true;
+                                const pdo_max_current_ma = pdo.get_current_ma();
+                                if (pdo_max_current_ma > max_current_ma) max_current_ma = pdo_max_current_ma;
+
+                                if (request.current_limit_ma > pdo_max_current_ma) continue;
 
                                 // PDO_INDEX: Use the current PDO index 'i'
                                 const pdo_index: u4 = @intCast(i);
 
                                 // VOLTAGE_SEL: Also crucial. "mV/100 for PPS, mV/200 for AVS".
                                 // Assuming for now it's a PPS PDO for simplicity, so mV/100.
-                                // You need to confirm if the PDO is PPS or AVS.
                                 const voltage_sel: u8 = @intCast(request.voltage_mv / 100); // Assuming PPS for now.
 
                                 // CURRENT_SEL: Derived from the requested current using the get_current_ma logic.
@@ -437,7 +432,31 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                                 return;
                             }
 
-                            return error.InvalidPDRequest;
+                            // Give an error saying you are just above the current limit
+                            if (voltage_match) {
+                                const errmsg = try std.fmt.allocPrint(allocator, "Current limit set too high. Set to {d}mV {d}mA but the max is {d}mV {d}mA", .{
+                                    request.voltage_mv,
+                                    request.current_limit_ma,
+                                    request.voltage_mv,
+                                    max_current_ma,
+                                });
+                                defer allocator.free(errmsg);
+                                try usb_cdc_write_protobuf(.{ .error_response = .{
+                                    .message = protobuf.ManagedString.managed(errmsg),
+                                } }, allocator);
+
+                                return;
+                            } else {
+                                const errmsg = try std.fmt.allocPrint(allocator, "Invalid Voltage. {s}", .{
+                                    "Set to a 100mV increment to use PPS or",
+                                });
+                                defer allocator.free(errmsg);
+                                try usb_cdc_write_protobuf(.{ .error_response = .{
+                                    .message = protobuf.ManagedString.managed(errmsg),
+                                } }, allocator);
+
+                                return;
+                            }
                         },
                         .usb_pd_read_pdo_request => |request| {
                             const pps = try hardware.getPPS(request.channel);
