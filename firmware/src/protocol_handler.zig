@@ -446,7 +446,8 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
 
                             // Give an error saying you are just above the current limit
                             if (voltage_match) {
-                                const errmsg = try std.fmt.allocPrint(allocator, "Current limit set too high. Set to {s}V {s}A but the max is {s}V {s}A", .{
+                                const errmsg = try std.fmt.allocPrint(allocator, "CH{d} Current limit set too high. Set to {s}V {s}A but the max is {s}V {s}A", .{
+                                    request.channel,
                                     &milliTo1dpFixed4(request.voltage_mv),
                                     &milliTo1dpFixed4(request.current_limit_ma),
                                     &milliTo1dpFixed4(request.voltage_mv),
@@ -459,7 +460,8 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
 
                                 return;
                             } else {
-                                const errmsg = try std.fmt.allocPrint(allocator, "Invalid Voltage. {s}", .{
+                                const errmsg = try std.fmt.allocPrint(allocator, "CH{d} Invalid Voltage. {s}", .{
+                                    request.channel,
                                     "Set to a 100mV increment to use PPS or",
                                 });
                                 defer allocator.free(errmsg);
