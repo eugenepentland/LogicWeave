@@ -126,8 +126,16 @@ pub fn milliTo1dpFixed4(milli: u32) [4]u8 {
     const tenths = (milli % 1000) / 100; // 0..9
 
     var out: [4]u8 = undefined;
-    out[0] = '0' + @as(u8, @intCast(whole / 10));
-    out[1] = '0' + @as(u8, @intCast(whole % 10));
+
+    if (whole < 10) {
+        // Use a space or invisible char instead of a leading '0'
+        out[0] = ' '; // or 0xC2,0xA0 for non-breaking space, or 0xE2,0x80,0x8B for zero-width space
+        out[1] = '0' + @as(u8, @intCast(whole));
+    } else {
+        out[0] = '0' + @as(u8, @intCast(whole / 10));
+        out[1] = '0' + @as(u8, @intCast(whole % 10));
+    }
+
     out[2] = '.';
     out[3] = '0' + @as(u8, @intCast(tenths));
     return out;
@@ -408,7 +416,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                                     if (request.voltage_mv > pdo.get_voltage_mv(false)) continue;
                                     if (request.voltage_mv < pdo.get_voltage_min_mv(false)) continue;
                                     //if (request.current_limit_ma > pdo.get_current_ma()) continue;
-                                    if (request.voltage_mv % 100 == 0) continue;
+                                    if (request.voltage_mv % 100 != 0) continue;
                                 } else {
                                     if (request.voltage_mv != pdo.get_voltage_mv(false)) continue;
                                 }
@@ -460,11 +468,36 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
 
                                 return;
                             } else {
-                                const errmsg = try std.fmt.allocPrint(allocator, "CH{d} Invalid Voltage. {s}", .{
-                                    request.channel,
-                                    "Set to a 100mV increment to use PPS or",
-                                });
+                                var errmsg: []u8 = undefined;
+                                if (has_pps) {
+                                    const voltage_round_up = ((request.voltage_mv + 99) / 100) * 100;
+                                    const voltage_round_down = (request.voltage_mv / 100) * 100;
+                                    errmsg = try std.fmt.allocPrint(allocator, "CH{d} {d}mV Invalid Voltage. Try {d}mV or {d}mV instead.", .{
+                                        request.channel,
+                                        request.voltage_mv,
+                                        voltage_round_up,
+                                        voltage_round_down,
+                                    });
+                                } else {
+                                    var buff = try allocator.alloc(u8, 48);
+                                    var index: usize = 0;
+                                    defer allocator.free(buff);
+                                    for (1..14) |i| {
+                                        const pdo = try pps.readSourcePDO(@intCast(i));
+                                        if (pdo.is_pps()) continue;
+                                        if (pdo.get_voltage_mv(false) == 0) continue;
+
+                                        const slice = try std.fmt.bufPrint(buff[index..], "{s}V, ", .{milliTo1dpFixed4(pdo.get_voltage_mv(false))});
+                                        index = index + slice.len;
+                                    }
+                                    errmsg = try std.fmt.allocPrint(allocator, "CH{d} {d}mV Invalid Voltage. Available voltages are {s}", .{
+                                        request.channel,
+                                        request.voltage_mv,
+                                        buff[0..index],
+                                    });
+                                }
                                 defer allocator.free(errmsg);
+
                                 try usb_cdc_write_protobuf(.{ .error_response = .{
                                     .message = protobuf.ManagedString.managed(errmsg),
                                 } }, allocator);
