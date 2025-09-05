@@ -75,6 +75,39 @@ class PDChannel:
     def __repr__(self):
         return f"<PDChannel channel={self.channel_num}>"
 
+    def print_all_options(controller: 'LogicWeave'):
+        """
+        Prints all available PDOs for all 14 PD channels.
+
+        Args:
+            controller (LogicWeave): The main device controller instance.
+        """
+        print("Reading and printing all available PDO options for all 14 PD channels:")
+        try:
+            pdos = read_all_pdos(controller, channel_num)
+            if not pdos:
+                print("  No PDOs available or device not connected.")
+            else:
+
+                for i in range(1,14):
+                    pdo = self.read_source_capability(i)
+                    if pdo.voltage_mv == 0:
+                        continue
+                    print(f"  PDO {i}:")
+                    if pdo.is_fixed:
+                        print(f"    Type: Fixed Supply")
+                        print(f"    Voltage: {pdo.voltage_mv} mV")
+                        print(f"    Current: {pdo.current_ma} mA")
+                    else:
+                        print(f"    Type: Variable Supply")
+                        print(f"    Voltage Range: {pdo.voltage_mv_min} mV - {pdo.voltage_mv} mV")
+                        print(f"    Current: {pdo.current_ma} mA")
+        except DeviceConnectionError as e:
+            print(f"  Error reading from channel {channel_num}: {e}")
+        except Exception as e:
+            print(f"  An unexpected error occurred for channel {channel_num}: {e}")
+
+
 class UART:
     """Represents a configured UART peripheral instance."""
     def __init__(self, controller: 'LogicWeave', instance_num: int, tx_pin: int, rx_pin: int, baud_rate: int):
