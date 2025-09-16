@@ -75,39 +75,6 @@ class PDChannel:
     def __repr__(self):
         return f"<PDChannel channel={self.channel_num}>"
 
-    def print_all_options(controller: 'LogicWeave'):
-        """
-        Prints all available PDOs for all 14 PD channels.
-
-        Args:
-            controller (LogicWeave): The main device controller instance.
-        """
-        print("Reading and printing all available PDO options for all 14 PD channels:")
-        try:
-            pdos = read_all_pdos(controller, channel_num)
-            if not pdos:
-                print("  No PDOs available or device not connected.")
-            else:
-
-                for i in range(1,14):
-                    pdo = self.read_source_capability(i)
-                    if pdo.voltage_mv == 0:
-                        continue
-                    print(f"  PDO {i}:")
-                    if pdo.is_fixed:
-                        print(f"    Type: Fixed Supply")
-                        print(f"    Voltage: {pdo.voltage_mv} mV")
-                        print(f"    Current: {pdo.current_ma} mA")
-                    else:
-                        print(f"    Type: Variable Supply")
-                        print(f"    Voltage Range: {pdo.voltage_mv_min} mV - {pdo.voltage_mv} mV")
-                        print(f"    Current: {pdo.current_ma} mA")
-        except DeviceConnectionError as e:
-            print(f"  Error reading from channel {channel_num}: {e}")
-        except Exception as e:
-            print(f"  An unexpected error occurred for channel {channel_num}: {e}")
-
-
 class UART:
     """Represents a configured UART peripheral instance."""
     def __init__(self, controller: 'LogicWeave', instance_num: int, tx_pin: int, rx_pin: int, baud_rate: int):
@@ -200,6 +167,17 @@ class GPIO:
         request = all_pb2.GPIOModeRequest(gpio_pin=self.pin, mode=mode)
         self._controller._send_and_parse(request, "gpio_mode_response")
         self.mode = mode
+
+    def set_pull(self, state: all_pb2.PinPullState):
+        """
+        Sets the mode (input, output, etc.) for this GPIO pin.
+
+        Args:
+            mode (all_pb2.Mode): The desired mode from the protobuf enum.
+        """
+        request = all_pb2.GpioPinPullRequest(gpio_pin=self.pin, state=state)
+        self._controller._send_and_parse(request, "gpio_pin_pull_response")
+        self.pull = state
 
     def write(self, state: bool):
         """Writes a boolean state (True for HIGH, False for LOW) to this pin."""

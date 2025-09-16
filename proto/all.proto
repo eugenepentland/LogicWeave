@@ -14,6 +14,12 @@ enum BankVoltage {
   V5P0 = 2;
 }
 
+enum PinPullState {
+  None = 0;
+  PullUp = 1;
+  PullDown = 2;
+}
+
 message UsbBootloaderRequest {
   uint32 val = 1;
 }
@@ -72,6 +78,11 @@ message SPIReadRequest {
 
 message SPIReadResponse {
   bytes data = 1;
+}
+
+message GpioPinPullRequest {
+  uint32 gpio_pin = 1;
+  PinPullState state = 2;
 }
 
 message I2CSetupRequest {
@@ -275,5 +286,7 @@ message AppMessage {
     Empty uart_write_response = 54;
     LogMessagesRequest log_messages_request = 55;
     Empty log_messages_response = 56;
+    GpioPinPullRequest gpio_pin_pull_request = 57;
+    Empty gpio_pin_pull_response = 58;
   }
 }
