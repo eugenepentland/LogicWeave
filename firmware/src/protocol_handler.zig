@@ -362,6 +362,15 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 try i2c_instance.write_blocking(@enumFromInt(device_address), request.data.getSlice(), null);
                 try usb_cdc_write_protobuf(.{ .i2c_write_response = .{ .status = 200 } }, allocator);
             },
+            .gpio_pin_pull_request => |request| {
+                const pin = hardware.getGPIO(request.gpio_pin);
+                switch (request.state) {
+                    .PullUp => pin.set_pull(.up),
+                    .PullDown => pin.set_pull(.down),
+                    .None => pin.set_pull(.disabled),
+                    else => return error.InvalidPullState,
+                }
+            },
 
             // Feature-specific functions (conditionally compiled)
             // These will only be included if GENERIC_FIRMWARE is 'false'

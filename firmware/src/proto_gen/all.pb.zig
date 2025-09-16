@@ -23,6 +23,13 @@ pub const BankVoltage = enum(i32) {
     _,
 };
 
+pub const PinPullState = enum(i32) {
+    None = 0,
+    PullUp = 1,
+    PullDown = 2,
+    _,
+};
+
 pub const UsbBootloaderRequest = struct {
     val: u32 = 0,
 
@@ -160,6 +167,18 @@ pub const SPIReadResponse = struct {
 
     pub const _desc_table = .{
         .data = fd(1, .Bytes),
+    };
+
+    pub usingnamespace protobuf.MessageMixins(@This());
+};
+
+pub const GpioPinPullRequest = struct {
+    gpio_pin: u32 = 0,
+    state: PinPullState = @enumFromInt(0),
+
+    pub const _desc_table = .{
+        .gpio_pin = fd(1, .{ .Varint = .Simple }),
+        .state = fd(2, .{ .Varint = .Simple }),
     };
 
     pub usingnamespace protobuf.MessageMixins(@This());
@@ -568,6 +587,8 @@ pub const AppMessage = struct {
         uart_write_response,
         log_messages_request,
         log_messages_response,
+        gpio_pin_pull_request,
+        gpio_pin_pull_response,
     };
     pub const kind_union = union(_kind_case) {
         gpio_mode_request: GPIOModeRequest,
@@ -625,6 +646,8 @@ pub const AppMessage = struct {
         uart_write_response: Empty,
         log_messages_request: LogMessagesRequest,
         log_messages_response: Empty,
+        gpio_pin_pull_request: GpioPinPullRequest,
+        gpio_pin_pull_response: Empty,
         pub const _union_desc = .{
             .gpio_mode_request = fd(1, .{ .SubMessage = {} }),
             .emtpy = fd(2, .{ .SubMessage = {} }),
@@ -681,6 +704,8 @@ pub const AppMessage = struct {
             .uart_write_response = fd(54, .{ .SubMessage = {} }),
             .log_messages_request = fd(55, .{ .SubMessage = {} }),
             .log_messages_response = fd(56, .{ .SubMessage = {} }),
+            .gpio_pin_pull_request = fd(57, .{ .SubMessage = {} }),
+            .gpio_pin_pull_response = fd(58, .{ .SubMessage = {} }),
         };
     };
 
