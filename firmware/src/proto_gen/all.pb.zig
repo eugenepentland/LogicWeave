@@ -16,6 +16,14 @@ pub const Mode = enum(i32) {
     _,
 };
 
+pub const SelfTestResult = enum(i32) {
+    _reserved = 0,
+    Pass = 1,
+    StuckHigh = 2,
+    StuckLow = 3,
+    _,
+};
+
 pub const BankVoltage = enum(i32) {
     V1P8 = 0,
     V3P3 = 1,
@@ -352,6 +360,26 @@ pub const UsbPDReadPDOResponse = struct {
     pub usingnamespace protobuf.MessageMixins(@This());
 };
 
+pub const GpioSelfTestRequest = struct {
+    gpio_pin: u32 = 0,
+
+    pub const _desc_table = .{
+        .gpio_pin = fd(1, .{ .Varint = .Simple }),
+    };
+
+    pub usingnamespace protobuf.MessageMixins(@This());
+};
+
+pub const GpioSelfTestResponse = struct {
+    result: SelfTestResult = @enumFromInt(0),
+
+    pub const _desc_table = .{
+        .result = fd(1, .{ .Varint = .Simple }),
+    };
+
+    pub usingnamespace protobuf.MessageMixins(@This());
+};
+
 pub const UsbPDEnableRequest = struct {
     channel: u32 = 0,
     on: bool = false,
@@ -589,6 +617,8 @@ pub const AppMessage = struct {
         log_messages_response,
         gpio_pin_pull_request,
         gpio_pin_pull_response,
+        gpio_self_test_request,
+        gpio_self_test_response,
     };
     pub const kind_union = union(_kind_case) {
         gpio_mode_request: GPIOModeRequest,
@@ -648,6 +678,8 @@ pub const AppMessage = struct {
         log_messages_response: Empty,
         gpio_pin_pull_request: GpioPinPullRequest,
         gpio_pin_pull_response: Empty,
+        gpio_self_test_request: GpioSelfTestRequest,
+        gpio_self_test_response: GpioSelfTestResponse,
         pub const _union_desc = .{
             .gpio_mode_request = fd(1, .{ .SubMessage = {} }),
             .emtpy = fd(2, .{ .SubMessage = {} }),
@@ -706,6 +738,8 @@ pub const AppMessage = struct {
             .log_messages_response = fd(56, .{ .SubMessage = {} }),
             .gpio_pin_pull_request = fd(57, .{ .SubMessage = {} }),
             .gpio_pin_pull_response = fd(58, .{ .SubMessage = {} }),
+            .gpio_self_test_request = fd(59, .{ .SubMessage = {} }),
+            .gpio_self_test_response = fd(60, .{ .SubMessage = {} }),
         };
     };
 

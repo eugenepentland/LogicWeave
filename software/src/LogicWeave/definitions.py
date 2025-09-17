@@ -1,4 +1,5 @@
 import enum
+from enum import Enum
 
 class GPIOMode(enum.IntEnum):
     INPUT = 0
@@ -9,7 +10,11 @@ class BankVoltage(enum.IntEnum):
     V1P8 = 0
     V3P3 = 1
     V5P0 = 2
-from enum import Enum
+
+class PinPullState(enum.IntEnum):
+    NONE = 0
+    PULLUP = 1
+    PULLDOWN = 2
 
 class RP2350:
     """

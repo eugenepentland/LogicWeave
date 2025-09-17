@@ -8,6 +8,13 @@ enum Mode {
   pwm = 2;
 }
 
+enum SelfTestResult {
+  _reserved =  0;
+  Pass = 1;
+  StuckHigh = 2;
+  StuckLow = 3;
+}
+
 enum BankVoltage {
   V1P8 = 0;
   V3P3 = 1;
@@ -156,6 +163,14 @@ message UsbPDReadPDOResponse {
   uint32 voltage_mv_min = 4;
 }
 
+message GpioSelfTestRequest {
+  uint32 gpio_pin = 1;
+}
+
+message GpioSelfTestResponse {
+  SelfTestResult result = 1;
+}
+
 message UsbPDEnableRequest {
   uint32 channel = 1;
   bool on = 2;
@@ -288,5 +303,7 @@ message AppMessage {
     Empty log_messages_response = 56;
     GpioPinPullRequest gpio_pin_pull_request = 57;
     Empty gpio_pin_pull_response = 58;
+    GpioSelfTestRequest gpio_self_test_request = 59;
+    GpioSelfTestResponse gpio_self_test_response = 60;
   }
 }

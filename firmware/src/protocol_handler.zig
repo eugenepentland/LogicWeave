@@ -362,6 +362,43 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 try i2c_instance.write_blocking(@enumFromInt(device_address), request.data.getSlice(), null);
                 try usb_cdc_write_protobuf(.{ .i2c_write_response = .{ .status = 200 } }, allocator);
             },
+            .gpio_self_test_request => |request| {
+                const pin = hardware.getGPIO(request.gpio_pin);
+                pin.set_function(.sio); // Set as GPIO
+                pin.set_pull(.disabled);
+                pin.set_drive_strength(.@"2mA");
+
+                pin.set_direction(.out);
+                pin.set_pull(.up);
+                pin.put(1);
+                rp2xxx.time.sleep_us(10);
+                pin.set_direction(.in);
+
+                const state_high = pin.read();
+                pin.set_direction(.out);
+                pin.set_pull(.down);
+                pin.put(0);
+
+                if (state_high != 1) {
+                    try usb_cdc_write_protobuf(.{ .gpio_self_test_response = .{ .result = .StuckLow } }, allocator);
+                    return;
+                }
+
+                rp2xxx.time.sleep_us(10);
+                pin.set_direction(.in);
+                const state_low = pin.read();
+
+                pin.set_direction(.out);
+                pin.set_pull(.down);
+                pin.put(0);
+
+                if (state_low != 0) {
+                    try usb_cdc_write_protobuf(.{ .gpio_self_test_response = .{ .result = .StuckHigh } }, allocator);
+                    return;
+                }
+
+                try usb_cdc_write_protobuf(.{ .gpio_self_test_response = .{ .result = .Pass } }, allocator);
+            },
             .gpio_pin_pull_request => |request| {
                 const pin = hardware.getGPIO(request.gpio_pin);
                 switch (request.state) {
@@ -370,6 +407,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                     .None => pin.set_pull(.disabled),
                     else => return error.InvalidPullState,
                 }
+                try usb_cdc_write_protobuf(.{ .gpio_pin_pull_response = .{ .status = 200 } }, allocator);
             },
 
             // Feature-specific functions (conditionally compiled)
