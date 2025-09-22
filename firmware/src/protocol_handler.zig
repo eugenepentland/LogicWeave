@@ -15,82 +15,18 @@ const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
 const Duration = microzig.drivers.time.Duration;
 
-var usb_rx_buff: [1024]u8 = undefined;
-
-// --- USB Communication Functions ---
-fn usb_cdc_read() []const u8 {
-    var total_read: usize = 0;
-    var read_buff: []u8 = usb_rx_buff[0..];
-
-    while (true) {
-        const len = usb_cfg.driver_cdc.read(read_buff);
-        read_buff = read_buff[len..];
-        total_read += len;
-        if (len == 0) break;
-    }
-    return usb_rx_buff[0..total_read];
-}
-
-fn usb_cdc_write(buff: []const u8) void {
-    const usb_dev = rp2xxx.usb.Usb(.{});
-    var write_buff = buff;
-
-    const msg_lenth: u8 = @intCast(write_buff.len);
-    _ = usb_cfg.driver_cdc.write(&[_]u8{msg_lenth});
-
-    while (write_buff.len > 0) {
-        write_buff = usb_cfg.driver_cdc.write(write_buff);
-        usb_dev.task(false) catch unreachable;
-    }
-    _ = usb_cfg.driver_cdc.write_flush();
-    usb_dev.task(false) catch unreachable;
-}
-
-fn usb_cdc_write_protobuf(kind: definitions.AppMessage.kind_union, allocator: std.mem.Allocator) !void {
+fn usb_cdc_write_protobuf(kind: definitions.AppMessage.kind_union, allocator: std.mem.Allocator) ![]const u8 {
     const resp = definitions.AppMessage{ .kind = kind };
-    const encoded = try resp.encode(allocator);
-    defer allocator.free(encoded);
-    usb_cdc_write(encoded);
+    return try resp.encode(allocator);
 }
 
 // --- Main Public Handler Function ---
-pub fn handle_incoming_usb(allocator: std.mem.Allocator) void {
-    const rx_data = usb_cdc_read();
-    if (rx_data.len == 0) return;
-
-    handleProto(allocator, rx_data[0..]) catch |err| {
+pub fn handle_incoming_usb(allocator: std.mem.Allocator, rx_data: []u8) []const u8 {
+    return handleProto(allocator, rx_data[0..]) catch |err| {
         var err_buff: [64]u8 = undefined;
         const formatted_err = std.fmt.bufPrint(err_buff[0..], "{}", .{err}) catch "format error";
-        usb_cdc_write_protobuf(.{ .error_response = .{ .message = protobuf.ManagedString.managed(formatted_err) } }, allocator) catch {};
+        return usb_cdc_write_protobuf(.{ .error_response = .{ .message = protobuf.ManagedString.managed(formatted_err) } }, allocator) catch {};
     };
-
-    // Log the data to a file if enabled
-    if (comptime !firmware_config.GENERIC) {
-        if (!hardware.log_commands) return;
-        if (hardware.log_filename_slice.len == 0) return;
-
-        // init the SD card (currently has to be done every time)
-        hardware.sd.initialize(8_000_000) catch return;
-
-        // Check if the filename exists
-        const filepath = std.fmt.allocPrintZ(allocator, "0:/{s}.bin", .{hardware.log_filename_slice}) catch return;
-        defer allocator.free(filepath);
-
-        var file = fatfs.File.open(filepath, .{
-            .mode = .open_append,
-            .access = .read_write,
-        }) catch return;
-
-        defer file.close();
-
-        const message_length: u8 = @intCast(rx_data[0..].len);
-
-        // Write the length of the message
-        file.writer().writeAll(&[_]u8{message_length}) catch return;
-
-        // Write the message
-        file.writer().writeAll(rx_data[0..]) catch return;
-    }
 }
 
 fn calculateCurrentSelect(target_ma: u32) u4 {
@@ -141,7 +77,18 @@ pub fn milliTo1dpFixed4(milli: u32) [4]u8 {
     return out;
 }
 
-fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
+pub fn handleProto(allocator: std.mem.Allocator, input: []const u8) []const u8 {
+    const resp = handleProto2(allocator, input) catch |err| {
+        var err_buff: [64]u8 = undefined;
+        const formatted_err = std.fmt.bufPrint(err_buff[0..], "{}", .{err}) catch "format error";
+        return usb_cdc_write_protobuf(.{ .error_response = .{ .message = protobuf.ManagedString.managed(formatted_err) } }, allocator) catch {
+            return "Error";
+        };
+    };
+    return resp;
+}
+
+pub fn handleProto2(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
     const msg = try protobuf.pb_decode(definitions.AppMessage, input, allocator);
     defer msg.deinit();
 
@@ -149,7 +96,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
     if (msg.kind) |kind_enum| {
         switch (kind_enum) {
             .firmware_info_request => |_| {
-                try usb_cdc_write_protobuf(.{ .firmware_info_response = .{
+                return try usb_cdc_write_protobuf(.{ .firmware_info_response = .{
                     .hash = protobuf.ManagedString.managed(firmware_config.GIT_HASH),
                     .version = protobuf.ManagedString.managed("1.0.1"),
                     .updated_at = protobuf.ManagedString.managed(firmware_config.UPDATED_AT),
@@ -158,18 +105,18 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
             .echo_message => |content| {
                 const message = content.message.getSlice();
                 const resp: definitions.AppMessage.kind_union = .{ .echo_message = .{ .message = protobuf.ManagedString.managed(message) } };
-                try usb_cdc_write_protobuf(resp, allocator);
+                return try usb_cdc_write_protobuf(resp, allocator);
             },
             .gpio_read_request => |request| {
                 const pin = hardware.getGPIO(request.gpio_pin);
                 const state = pin.read();
                 const kind: definitions.AppMessage.kind_union = .{ .gpio_read_response = .{ .state = state != 0 } };
-                try usb_cdc_write_protobuf(kind, allocator);
+                return try usb_cdc_write_protobuf(kind, allocator);
             },
             .gpio_write_request => |request| {
                 const pin = hardware.getGPIO(request.gpio_pin);
                 pin.put(@intFromBool(request.state));
-                try usb_cdc_write_protobuf(.{ .gpio_write_response = .{ .status = 200 } }, allocator);
+                return try usb_cdc_write_protobuf(.{ .gpio_write_response = .{ .status = 200 } }, allocator);
             },
             .gpio_mode_request => |request| {
                 const pin = hardware.getGPIO(request.gpio_pin);
@@ -187,7 +134,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                     },
                     else => {}, // Handle other modes if necessary, or make this an error
                 }
-                try usb_cdc_write_protobuf(.{ .gpio_mode_response = .{ .status = 200 } }, allocator);
+                return try usb_cdc_write_protobuf(.{ .gpio_mode_response = .{ .status = 200 } }, allocator);
             },
             .uart_setup_request => |request| {
                 const tx_pin = hardware.getGPIO(request.tx_pin);
@@ -202,7 +149,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                     .baud_rate = @intCast(request.baud_rate),
                     .clock_config = rp2xxx.clock_config,
                 });
-                try usb_cdc_write_protobuf(.{ .uart_setup_response = .{ .status = 200 } }, allocator);
+                return try usb_cdc_write_protobuf(.{ .uart_setup_response = .{ .status = 200 } }, allocator);
             },
             .uart_write_request => |request| {
                 const uart = rp2xxx.uart.instance.num(@intCast(request.instance_num));
@@ -211,7 +158,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 uart.write_blocking(data, Duration.from_ms(@intCast(request.timeout_ms))) catch {
                     uart.clear_errors();
                 };
-                try usb_cdc_write_protobuf(.{ .uart_write_response = .{ .status = 200 } }, allocator);
+                return try usb_cdc_write_protobuf(.{ .uart_write_response = .{ .status = 200 } }, allocator);
             },
             .uart_read_request => |request| {
                 const uart = rp2xxx.uart.instance.num(@intCast(request.instance_num));
@@ -222,7 +169,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                     uart.clear_errors();
                 };
                 const resp: definitions.AppMessage.kind_union = .{ .uart_read_response = .{ .data = protobuf.ManagedString.managed(buff[0..]) } };
-                try usb_cdc_write_protobuf(resp, allocator);
+                return try usb_cdc_write_protobuf(resp, allocator);
             },
             .spi_setup_request => |request| {
                 const mosi_pin = hardware.getGPIO(request.mosi_pin);
@@ -241,7 +188,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 }
                 try spi_instance.apply(.{ .clock_config = rp2xxx.clock_config });
                 time.sleep_us(100);
-                try usb_cdc_write_protobuf(.{ .spi_setup_response = .{ .status = 200 } }, allocator);
+                return try usb_cdc_write_protobuf(.{ .spi_setup_response = .{ .status = 200 } }, allocator);
             },
             .soft_spi_write_request => |request| {
                 // Get GPIO pins from the request
@@ -290,7 +237,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 // 4. End the transaction by setting Chip Select high
                 cs_pin.put(1);
 
-                try usb_cdc_write_protobuf(.{ .soft_spi_write_response = .{ .status = 200 } }, allocator);
+                return try usb_cdc_write_protobuf(.{ .soft_spi_write_response = .{ .status = 200 } }, allocator);
             },
             .spi_write_request => |request| {
                 const spi_instance = rp2xxx.spi.instance.num(@truncate(request.instance_num));
@@ -306,7 +253,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                     spi_instance.write_blocking(u8, request.data.getSlice());
                 }
 
-                try usb_cdc_write_protobuf(.{ .spi_write_response = .{ .status = 200 } }, allocator);
+                return try usb_cdc_write_protobuf(.{ .spi_write_response = .{ .status = 200 } }, allocator);
             },
             .spi_read_request => |request| {
                 var buff: []u8 = try allocator.alloc(u8, @truncate(request.byte_count));
@@ -325,7 +272,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 }
 
                 const resp: definitions.AppMessage.kind_union = .{ .spi_read_response = .{ .data = protobuf.ManagedString.managed(buff[0..]) } };
-                try usb_cdc_write_protobuf(resp, allocator);
+                return try usb_cdc_write_protobuf(resp, allocator);
             },
 
             // Generic I2C functions (always included)
@@ -344,7 +291,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                     .clock_config = rp2xxx.clock_config,
                 });
 
-                try usb_cdc_write_protobuf(.{ .i2c_setup_response = .{ .status = 200 } }, allocator);
+                return try usb_cdc_write_protobuf(.{ .i2c_setup_response = .{ .status = 200 } }, allocator);
             },
             .i2c_read_request => |request| {
                 var buff: []u8 = try allocator.alloc(u8, @truncate(request.byte_count));
@@ -354,13 +301,13 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
 
                 try i2c_instance.write_then_read_blocking(@enumFromInt(device_address), request.data.getSlice(), buff[0..], null);
 
-                try usb_cdc_write_protobuf(.{ .i2c_read_response = .{ .data = protobuf.ManagedString.managed(buff[0..]) } }, allocator);
+                return try usb_cdc_write_protobuf(.{ .i2c_read_response = .{ .data = protobuf.ManagedString.managed(buff[0..]) } }, allocator);
             },
             .i2c_write_request => |request| {
                 const i2c_instance = rp2xxx.i2c.instance.num(@truncate(request.instance_num));
                 const device_address: u7 = @truncate(request.device_address);
                 try i2c_instance.write_blocking(@enumFromInt(device_address), request.data.getSlice(), null);
-                try usb_cdc_write_protobuf(.{ .i2c_write_response = .{ .status = 200 } }, allocator);
+                return try usb_cdc_write_protobuf(.{ .i2c_write_response = .{ .status = 200 } }, allocator);
             },
             .gpio_self_test_request => |request| {
                 const pin = hardware.getGPIO(request.gpio_pin);
@@ -380,8 +327,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 pin.put(0);
 
                 if (state_high != 1) {
-                    try usb_cdc_write_protobuf(.{ .gpio_self_test_response = .{ .result = .StuckLow } }, allocator);
-                    return;
+                    return try usb_cdc_write_protobuf(.{ .gpio_self_test_response = .{ .result = .StuckLow } }, allocator);
                 }
 
                 rp2xxx.time.sleep_us(10);
@@ -393,11 +339,10 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                 pin.put(0);
 
                 if (state_low != 0) {
-                    try usb_cdc_write_protobuf(.{ .gpio_self_test_response = .{ .result = .StuckHigh } }, allocator);
-                    return;
+                    return try usb_cdc_write_protobuf(.{ .gpio_self_test_response = .{ .result = .StuckHigh } }, allocator);
                 }
 
-                try usb_cdc_write_protobuf(.{ .gpio_self_test_response = .{ .result = .Pass } }, allocator);
+                return try usb_cdc_write_protobuf(.{ .gpio_self_test_response = .{ .result = .Pass } }, allocator);
             },
             .gpio_pin_pull_request => |request| {
                 const pin = hardware.getGPIO(request.gpio_pin);
@@ -407,7 +352,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                     .None => pin.set_pull(.disabled),
                     else => return error.InvalidPullState,
                 }
-                try usb_cdc_write_protobuf(.{ .gpio_pin_pull_response = .{ .status = 200 } }, allocator);
+                return try usb_cdc_write_protobuf(.{ .gpio_pin_pull_response = .{ .status = 200 } }, allocator);
             },
 
             // Feature-specific functions (conditionally compiled)
@@ -422,15 +367,15 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                         .sd_info_request => |_| {
                             try hardware.sd.initialize(20_000_000);
                             //const capactiy_bytes = (try hardware.sd.readCSD()).capacity_bytes;
-                            try usb_cdc_write_protobuf(.{ .sd_info_response = .{ .capacity_bytes = 10 } }, allocator);
+                            return try usb_cdc_write_protobuf(.{ .sd_info_response = .{ .capacity_bytes = 10 } }, allocator);
                         },
                         .write_text_request => |request| {
                             try hardware.g.drawString(request.text.getSlice(), @intCast(request.x), @intCast(request.y));
-                            try usb_cdc_write_protobuf(.{ .write_text_response = .{ .status = 200 } }, allocator);
+                            return try usb_cdc_write_protobuf(.{ .write_text_response = .{ .status = 200 } }, allocator);
                         },
                         .clear_screen_request => |_| {
                             hardware.g.clear(.White);
-                            try usb_cdc_write_protobuf(.{ .clear_screen_response = .{ .status = 200 } }, allocator);
+                            return try usb_cdc_write_protobuf(.{ .clear_screen_response = .{ .status = 200 } }, allocator);
                         },
                         .refresh_screen_request => |_| {
                             try hardware.screen.global_update(
@@ -440,12 +385,12 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                                 0x19,
                             );
                             hardware.g.refreshFrameBuffer();
-                            try usb_cdc_write_protobuf(.{ .refresh_screen_response = .{ .status = 200 } }, allocator);
+                            return try usb_cdc_write_protobuf(.{ .refresh_screen_response = .{ .status = 200 } }, allocator);
                         },
                         .usb_pd_enable_request => |request| {
                             const pps = try hardware.getPPS(request.channel);
                             pps.enable(request.on);
-                            try usb_cdc_write_protobuf(.{ .usb_pd_enable_response = .{ .status = 200 } }, allocator);
+                            return try usb_cdc_write_protobuf(.{ .usb_pd_enable_response = .{ .status = 200 } }, allocator);
                         },
                         .usb_pd_write_pdo_request => |request| {
                             const pps = try hardware.getPPS(request.channel);
@@ -492,11 +437,9 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                                     .voltage_select = voltage_sel,
                                 });
 
-                                try usb_cdc_write_protobuf(.{ .usb_pd_write_pdo_response = .{
+                                return try usb_cdc_write_protobuf(.{ .usb_pd_write_pdo_response = .{
                                     .pdo_index = pdo_index,
                                 } }, allocator);
-
-                                return;
                             }
 
                             // Give an error saying you are just above the current limit
@@ -509,11 +452,9 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                                     &milliTo1dpFixed4(max_current_ma),
                                 });
                                 defer allocator.free(errmsg);
-                                try usb_cdc_write_protobuf(.{ .error_response = .{
+                                return try usb_cdc_write_protobuf(.{ .error_response = .{
                                     .message = protobuf.ManagedString.managed(errmsg),
                                 } }, allocator);
-
-                                return;
                             } else {
                                 var errmsg: []u8 = undefined;
                                 if (has_pps) {
@@ -545,11 +486,9 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                                 }
                                 defer allocator.free(errmsg);
 
-                                try usb_cdc_write_protobuf(.{ .error_response = .{
+                                return try usb_cdc_write_protobuf(.{ .error_response = .{
                                     .message = protobuf.ManagedString.managed(errmsg),
                                 } }, allocator);
-
-                                return;
                             }
                         },
                         .usb_pd_read_pdo_request => |request| {
@@ -557,7 +496,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
 
                             const pdo = try pps.readSourcePDO(@intCast(request.index));
 
-                            try usb_cdc_write_protobuf(.{ .usb_pd_read_pdo_response = .{
+                            return try usb_cdc_write_protobuf(.{ .usb_pd_read_pdo_response = .{
                                 .voltage_mv = pdo.get_voltage_mv(false),
                                 .current_ma = pdo.get_current_ma(),
                                 .is_fixed = pdo.type == 0,
@@ -567,7 +506,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                         .usb_pd_read_request => |request| {
                             const pps = try hardware.getPPS(request.channel);
 
-                            try usb_cdc_write_protobuf(.{ .usb_pd_read_response = .{
+                            return try usb_cdc_write_protobuf(.{ .usb_pd_read_response = .{
                                 .measured_voltage_mv = try pps.readVoltageMv(),
                                 .measured_current_ma = try pps.readCurrentMa(),
                                 .requested_voltage_mv = try pps.readRequestedVoltageMv(),
@@ -577,34 +516,20 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
                         },
                         // doesn't work currently for the rp2350
                         .usb_bootloader_request => |_| {
-                            try usb_cdc_write_protobuf(.{ .usb_bootloader_response = .{ .status = 200 } }, allocator);
-                            rp2xxx.rom.reset_usb_boot(0, 0);
+                            return try usb_cdc_write_protobuf(.{ .usb_bootloader_response = .{ .status = 200 } }, allocator);
+                            //rp2xxx.rom.reset_usb_boot(0, 0);
                         },
                         .usb_pd_read_temperature_request => |_| {
                             const temp1 = hardware.pps1.readTemperature() catch 0;
                             const temp2 = hardware.pps1.readTemperature() catch 0;
-                            try usb_cdc_write_protobuf(.{ .usb_pd_read_temperature_response = .{
+                            return try usb_cdc_write_protobuf(.{ .usb_pd_read_temperature_response = .{
                                 .temperature_ch1_c = temp1,
                                 .temperature_ch2_c = temp2,
                             } }, allocator);
                         },
-                        .log_messages_request => |request| {
-                            const fname = request.filename.getSlice();
-                            std.mem.copyForwards(u8, hardware.log_filename_slice, fname);
-                            hardware.log_commands = request.enabled;
-
-                            // init the SD card (currently has to be done every time)
-                            hardware.sd.initialize(8_000_000) catch return;
-
-                            // Check if the filename exists
-                            const filepath = try std.fmt.allocPrintZ(allocator, "0:/{s}.bin", .{hardware.log_filename_slice});
-                            defer allocator.free(filepath);
-
-                            try createFileAndClearContents(filepath);
-                        },
                         .write_bank_voltage_request => |request| {
                             try hardware.set_bank_voltage(request.bank, request.voltage);
-                            try usb_cdc_write_protobuf(.{ .write_bank_voltage_response = .{ .status = 200 } }, allocator);
+                            return try usb_cdc_write_protobuf(.{ .write_bank_voltage_response = .{ .status = 200 } }, allocator);
                         },
                         // If any other unhandled cases exist in the full-featured version, they would fall here.
                         // For now, we assume all are covered or explicitly invalid.
@@ -616,6 +541,7 @@ fn handleProto(allocator: std.mem.Allocator, input: []const u8) !void {
             },
         }
     }
+    return error.NoMessage;
 }
 
 fn createFileAndClearContents(path: [:0]const u8) !void {

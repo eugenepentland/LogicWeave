@@ -11,6 +11,7 @@ const Graphics = @import("graphics.zig");
 const hardware = @import("hardware.zig");
 const usb_cfg = @import("usb_config.zig");
 const protocol_handler = @import("protocol_handler.zig");
+const definitions = @import("proto_gen/all.pb.zig");
 
 const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
@@ -30,28 +31,42 @@ pub fn panic(message: []const u8, s: ?*std.builtin.StackTrace, _: ?usize) noretu
 }
 
 fn core1() void {
-    //var last_update_time: u64 = time.get_time_since_boot().to_us();
-
-    while (true) {
-        hardware.poll_and_update_display() catch {}; // Ignore display errors
-    }
-}
-
-var stack: [256]u32 = undefined;
-
-pub fn main() !void {
     // 1. Setup allocator for protocol handler
-    var buffer: [4096]u8 = undefined;
+    var buffer: [256]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const allocator = fba.allocator();
 
+    while (true) {
+        // Wait for data in the fifo
+        const message_len = rp2xxx.multicore.fifo.read_blocking();
+
+        shared_data_spinlock.lock();
+        const incoming_data = shared_usb_rx_buff[0..message_len];
+        shared_data_spinlock.unlock();
+
+        const response_data = protocol_handler.handleProto(allocator, incoming_data);
+        defer allocator.free(response_data);
+        //const response_data = incoming_data;
+
+        shared_data_spinlock.lock();
+        std.mem.copyForwards(u8, &shared_usb_tx_buff, response_data);
+        rp2xxx.multicore.fifo.write_blocking(@intCast(response_data.len));
+        shared_data_spinlock.unlock();
+    }
+}
+
+var stack: [8192]u32 = undefined;
+
+pub fn main() !void {
+
     // Initalize the screen, USB PD ports, intterupts for logicweave board
     if (comptime !firmware_config.GENERIC) {
-        hardware.init(allocator) catch |err| {
-            std.log.err("Hardware init failed: {}", .{err});
-        };
-        try menu.render_menu();
+        //hardware.init(allocator) catch |err| {
+        //    std.log.err("Hardware init failed: {}", .{err});
+        //};
+        //try menu.render_menu();
     }
+    rp2xxx.multicore.launch_core1_with_stack(&core1, &stack);
 
     // 2. Initialize the USB device
     const usb_dev = usb.Usb(.{});
@@ -63,7 +78,62 @@ pub fn main() !void {
         // Poll for USB events
         usb_dev.task(false) catch unreachable;
 
-        // Check for and handle any incoming USB commands
-        protocol_handler.handle_incoming_usb(allocator);
+        // Read in any USB data if there is any
+        const rx_data = usb_cdc_read();
+        if (rx_data.len > 0) {
+            // Copy the data to the shared memory
+            shared_data_spinlock.lock();
+            std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data);
+            shared_data_spinlock.unlock();
+
+            // Signal to core1 data is ready and what its length it
+            rp2xxx.multicore.fifo.write_blocking(@intCast(rx_data.len));
+        }
+
+        // Writes a response to the fifo if it gets any
+        const response_len = rp2xxx.multicore.fifo.read();
+        if (response_len) |len| {
+            shared_data_spinlock.lock();
+            const tx_data = shared_usb_tx_buff[0..len];
+            shared_data_spinlock.unlock();
+
+            usb_cdc_write(tx_data);
+        }
     }
+}
+
+var shared_usb_rx_buff: [128]u8 = undefined;
+var shared_usb_tx_buff: [128]u8 = undefined;
+var usb_rx_buff: [128]u8 = undefined;
+var usb_tx_buff: [128]u8 = undefined;
+
+const shared_data_spinlock = rp2xxx.multicore.Spinlock.init(0);
+
+// --- USB Communication Functions ---
+fn usb_cdc_read() []const u8 {
+    var total_read: usize = 0;
+    var read_buff: []u8 = usb_rx_buff[0..];
+
+    while (true) {
+        const len = usb_cfg.driver_cdc.read(read_buff);
+        read_buff = read_buff[len..];
+        total_read += len;
+        if (len == 0) break;
+    }
+    return usb_rx_buff[0..total_read];
+}
+
+fn usb_cdc_write(buff: []const u8) void {
+    const usb_dev = rp2xxx.usb.Usb(.{});
+    var write_buff = buff;
+
+    const msg_lenth: u8 = @intCast(write_buff.len);
+    _ = usb_cfg.driver_cdc.write(&[_]u8{msg_lenth});
+
+    while (write_buff.len > 0) {
+        write_buff = usb_cfg.driver_cdc.write(write_buff);
+        usb_dev.task(false) catch unreachable;
+    }
+    _ = usb_cfg.driver_cdc.write_flush();
+    usb_dev.task(false) catch unreachable;
 }
