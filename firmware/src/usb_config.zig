@@ -34,7 +34,7 @@ pub var DEVICE_CONFIGURATION: usb.DeviceConfiguration = .{
     .lang_descriptor = "\x04\x03\x09\x04",
     .descriptor_strings = &.{
         &usb.utils.utf8ToUtf16Le("LogicWeave"),
-        &usb.utils.utf8ToUtf16Le("Programmer"),
+        &usb.utils.utf8ToUtf16Le("LogicWeaveCore"),
         &usb.utils.utf8ToUtf16Le("someserial"),
         &usb.utils.utf8ToUtf16Le("CDC"),
     },

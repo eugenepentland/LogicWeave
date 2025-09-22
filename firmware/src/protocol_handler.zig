@@ -15,18 +15,9 @@ const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
 const Duration = microzig.drivers.time.Duration;
 
-fn usb_cdc_write_protobuf(kind: definitions.AppMessage.kind_union, allocator: std.mem.Allocator) ![]const u8 {
+pub fn usb_cdc_write_protobuf(kind: definitions.AppMessage.kind_union, allocator: std.mem.Allocator) ![]const u8 {
     const resp = definitions.AppMessage{ .kind = kind };
     return try resp.encode(allocator);
-}
-
-// --- Main Public Handler Function ---
-pub fn handle_incoming_usb(allocator: std.mem.Allocator, rx_data: []u8) []const u8 {
-    return handleProto(allocator, rx_data[0..]) catch |err| {
-        var err_buff: [64]u8 = undefined;
-        const formatted_err = std.fmt.bufPrint(err_buff[0..], "{}", .{err}) catch "format error";
-        return usb_cdc_write_protobuf(.{ .error_response = .{ .message = protobuf.ManagedString.managed(formatted_err) } }, allocator) catch {};
-    };
 }
 
 fn calculateCurrentSelect(target_ma: u32) u4 {
@@ -77,18 +68,8 @@ pub fn milliTo1dpFixed4(milli: u32) [4]u8 {
     return out;
 }
 
-pub fn handleProto(allocator: std.mem.Allocator, input: []const u8) []const u8 {
-    const resp = handleProto2(allocator, input) catch |err| {
-        var err_buff: [64]u8 = undefined;
-        const formatted_err = std.fmt.bufPrint(err_buff[0..], "{}", .{err}) catch "format error";
-        return usb_cdc_write_protobuf(.{ .error_response = .{ .message = protobuf.ManagedString.managed(formatted_err) } }, allocator) catch {
-            return "Error";
-        };
-    };
-    return resp;
-}
 
-pub fn handleProto2(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
+pub fn handle_incoming_usb(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
     const msg = try protobuf.pb_decode(definitions.AppMessage, input, allocator);
     defer msg.deinit();
 
@@ -542,16 +523,4 @@ pub fn handleProto2(allocator: std.mem.Allocator, input: []const u8) ![]const u8
         }
     }
     return error.NoMessage;
-}
-
-fn createFileAndClearContents(path: [:0]const u8) !void {
-    // Open the file. If it doesn't exist, it will be created.
-    var file = try fatfs.File.open(path, .{
-        .mode = .open_always,
-        .access = .read_write,
-    });
-    defer file.close();
-
-    // Truncate the file to a size of zero, clearing its contents.
-    try file.truncate();
 }

@@ -6,6 +6,7 @@ const firmware_config = @import("firmware_config");
 const fatfs = @import("zfat");
 const menu = @import("menu.zig");
 const Graphics = @import("graphics.zig");
+const protobuf = @import("protobuf");
 
 // Import our new modules
 const hardware = @import("hardware.zig");
@@ -37,17 +38,26 @@ fn core1() void {
     const allocator = fba.allocator();
 
     while (true) {
-        // Wait for data in the fifo
+        // Wait for usb data length in the fifo
         const message_len = rp2xxx.multicore.fifo.read_blocking();
 
+        // Get the slice to the data
         shared_data_spinlock.lock();
         const incoming_data = shared_usb_rx_buff[0..message_len];
         shared_data_spinlock.unlock();
 
-        const response_data = protocol_handler.handleProto(allocator, incoming_data);
+        // Get the response
+        var response_data: []const u8 = undefined;
+        if (protocol_handler.handle_incoming_usb(allocator, incoming_data)) |succes_data| {
+            response_data = succes_data;
+        } else |err| {
+            var err_buff: [64]u8 = undefined;
+            const formatted_err = std.fmt.bufPrint(err_buff[0..], "{}", .{err}) catch "format error";
+            response_data = protocol_handler.usb_cdc_write_protobuf(.{ .error_response = .{ .message = protobuf.ManagedString.managed(formatted_err) } }, allocator) catch "error";
+        }
         defer allocator.free(response_data);
-        //const response_data = incoming_data;
 
+        // Send the response
         shared_data_spinlock.lock();
         std.mem.copyForwards(u8, &shared_usb_tx_buff, response_data);
         rp2xxx.multicore.fifo.write_blocking(@intCast(response_data.len));
