@@ -58,12 +58,15 @@ fn core1() void {
 var stack: [8192]u32 = undefined;
 
 pub fn main() !void {
+    var buffer: [4048]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
+    const allocator = fba.allocator();
 
     // Initalize the screen, USB PD ports, intterupts for logicweave board
     if (comptime !firmware_config.GENERIC) {
-        //hardware.init(allocator) catch |err| {
-        //    std.log.err("Hardware init failed: {}", .{err});
-        //};
+        hardware.init(allocator) catch |err| {
+            std.log.err("Hardware init failed: {}", .{err});
+        };
         //try menu.render_menu();
     }
     rp2xxx.multicore.launch_core1_with_stack(&core1, &stack);
@@ -78,27 +81,33 @@ pub fn main() !void {
         // Poll for USB events
         usb_dev.task(false) catch unreachable;
 
-        // Read in any USB data if there is any
-        const rx_data = usb_cdc_read();
-        if (rx_data.len > 0) {
-            // Copy the data to the shared memory
-            shared_data_spinlock.lock();
-            std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data);
-            shared_data_spinlock.unlock();
+        handleUsbRx();
+        handleUsbTx();
+    }
+}
 
-            // Signal to core1 data is ready and what its length it
-            rp2xxx.multicore.fifo.write_blocking(@intCast(rx_data.len));
-        }
+fn handleUsbRx() void {
+    // Read in any USB data if there is any
+    const rx_data = usb_cdc_read();
+    if (rx_data.len > 0) {
+        // Copy the data to the shared memory
+        shared_data_spinlock.lock();
+        std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data);
+        shared_data_spinlock.unlock();
 
-        // Writes a response to the fifo if it gets any
-        const response_len = rp2xxx.multicore.fifo.read();
-        if (response_len) |len| {
-            shared_data_spinlock.lock();
-            const tx_data = shared_usb_tx_buff[0..len];
-            shared_data_spinlock.unlock();
+        // Signal to core1 data is ready and what its length it
+        rp2xxx.multicore.fifo.write_blocking(@intCast(rx_data.len));
+    }
+}
 
-            usb_cdc_write(tx_data);
-        }
+fn handleUsbTx() void {
+    // Writes a response to the fifo if it gets any
+    const response_len = rp2xxx.multicore.fifo.read();
+    if (response_len) |len| {
+        shared_data_spinlock.lock();
+        const tx_data = shared_usb_tx_buff[0..len];
+        usb_cdc_write(tx_data);
+        shared_data_spinlock.unlock();
     }
 }
 
