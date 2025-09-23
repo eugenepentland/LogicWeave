@@ -26,6 +26,7 @@ pub const Code = enum(u32) {
     memcpy = rom_table_code('M', 'C'), // Only avaiable on: RP2040
     memcpy44 = rom_table_code('C', '4'), // Only avaiable on: RP2040
     reset_usb_boot = rom_table_code('U', 'B'),
+    rp2350_usb_boot = rom_table_code('R', 'B'),
     connect_internal_flash = rom_table_code('I', 'F'),
     flash_exit_xip = rom_table_code('E', 'X'),
     flash_range_erase = rom_table_code('R', 'E'),
@@ -44,6 +45,33 @@ pub fn reset_usb_boot(usb_activity_gpio_pin_mask: u32, disable_interface_mask: u
         S.f = @as(*const fn (usb_activity_gpio_pin_mask: u32, disable_interface_mask: u32) noreturn, @alignCast(@ptrCast(_rom_func_lookup(Code.reset_usb_boot))));
     }
     S.f.?(usb_activity_gpio_pin_mask, disable_interface_mask);
+}
+
+pub fn rp2350_reboot(flags: u32, delay_ms: u32, p0: u32, p1: u32) !void {
+    const S = struct {
+        var f: ?*const fn (flags: u32, delay_ms: u32, p0: u32, p1: u32) c_int = null;
+    };
+    if (S.f == null) {
+        S.f = @as(*const fn (u32, u32, u32, u32) c_int, @alignCast(@ptrCast(_rom_func_lookup(Code.rp2350_usb_boot))));
+    }
+    const rc: c_int = S.f.?(flags, delay_ms, p0, p1);
+    if (rc < 0) return error.BootromError;
+}
+
+// Convenience: reboot straight to BOOTSEL with MSD visible, no activity pin.
+// Convenience: reboot straight to BOOTSEL with MSD visible, no activity pin.
+pub fn reboot_to_bootsel_now() noreturn {
+    // Call the reboot function. On success, it will not return.
+    // If it *does* return, it means an error occurred.
+    // We catch the error but can't do much other than halt.
+    rp2350_reboot(0x0002, 10, 0, 0) catch {
+        // Reboot failed to initiate.
+        // You could add error signaling here, like flashing an LED.
+    };
+
+    // We should only reach this point if the reboot call returned an error.
+    // In any case, we must halt the CPU to prevent further execution.
+    while (true) {}
 }
 
 /// Signatures of all public bootrom functions

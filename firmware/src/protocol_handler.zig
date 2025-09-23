@@ -68,7 +68,6 @@ pub fn milliTo1dpFixed4(milli: u32) [4]u8 {
     return out;
 }
 
-
 pub fn handle_incoming_usb(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
     const msg = try protobuf.pb_decode(definitions.AppMessage, input, allocator);
     defer msg.deinit();

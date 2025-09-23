@@ -36,7 +36,7 @@ pub var DEVICE_CONFIGURATION: usb.DeviceConfiguration = .{
         &usb.utils.utf8ToUtf16Le("LogicWeave"),
         &usb.utils.utf8ToUtf16Le("LogicWeaveCore"),
         &usb.utils.utf8ToUtf16Le("someserial"),
-        &usb.utils.utf8ToUtf16Le("CDC"),
+        &usb.utils.utf8ToUtf16Le("Logic Weave Core"),
     },
     .drivers = &drivers,
 };

@@ -27,7 +27,7 @@ pub const microzig_options = microzig.Options{
 pub fn panic(message: []const u8, s: ?*std.builtin.StackTrace, _: ?usize) noreturn {
     std.log.err("The RP2350 has crashed: {s}. {any}", .{ message, s });
     @breakpoint();
-    rp2xxx.rom.reset_usb_boot(0, 0);
+    rp2xxx.rom.reboot_to_bootsel_now() catch {};
     while (true) {}
 }
 
