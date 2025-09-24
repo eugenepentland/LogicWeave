@@ -75,7 +75,6 @@ pub fn main() !void {
         hardware.init(allocator) catch |err| {
             std.log.err("Hardware init failed: {}", .{err});
         };
-        //try menu.render_menu();
     }
     rp2xxx.multicore.launch_core1_with_stack(&core1, &stack);
 
@@ -91,7 +90,12 @@ pub fn main() !void {
 
         handleUsbRx();
         handleUsbTx();
+        handleInterrupts();
     }
+}
+
+fn handleInterrupts() void {
+
 }
 
 fn handleUsbRx() void {

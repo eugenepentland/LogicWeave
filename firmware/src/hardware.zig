@@ -38,41 +38,66 @@ pub var pps2_btn_pressed = false;
 const pps1_ctrl_btn = rp2xxx.gpio.num(23);
 const pps2_ctrl_btn = rp2xxx.gpio.num(24);
 
+fn interruptIsReady() bool {
+    const current_time = time.get_time_since_boot().to_us();
+    if ((current_time - last_trigger_time) < DEBOUCE_TIME_US) return false;
+    last_trigger_time = current_time;
+    return true;
+}
+
+fn checkAndClearInterrupt(
+    comptime io_bank_name: []const u8,
+    comptime intr_reg_name: []const u8,
+    comptime field_name: []const u8,
+) bool {
+    const io_bank = @field(peripherals, io_bank_name);
+    var intr_reg = @field(io_bank, intr_reg_name);
+
+    // 3. Read the current status of the interrupt register.
+    const intr_status = intr_reg.read();
+
+    // 4. Check the specific interrupt flag (e.g., GPIO23_EDGE_LOW) using its name.
+    if (@field(intr_status, field_name) == 1) {
+        // The interrupt is active. Now we clear it.
+        var clear_mask = std.mem.zeroes(@TypeOf(intr_status));
+        @field(clear_mask, field_name) = 1;
+        intr_reg.modify(clear_mask);
+
+        return interruptIsReady();
+    }
+
+    return false;
+}
+
 // --- Interrupt Handler ---
 fn gpio_interrupt() callconv(.c) void {
     const cs = microzig.interrupt.enter_critical_section();
     defer cs.leave();
 
-    const intr2_status = peripherals.IO_BANK0.INTR2.read();
-    if (intr2_status.GPIO23_EDGE_LOW == 1) {
-        defer peripherals.IO_BANK0.INTR2.modify(.{ .GPIO23_EDGE_LOW = 1 });
-        const current_time = time.get_time_since_boot().to_us();
-        if ((current_time - last_trigger_time) > DEBOUCE_TIME_US) {
-            last_trigger_time = current_time;
-            pps1.toggle();
-        }
+    // Button to toggle CH1 PD power
+    if (checkAndClearInterrupt("IO_BANK0", "INTR2", "GPIO23_EDGE_LOW")) {
+        pps1.toggle();
+        return;
     }
 
-    const intr3_status = peripherals.IO_BANK0.INTR3.read();
-    if (intr3_status.GPIO24_EDGE_HIGH == 1) {
-        defer peripherals.IO_BANK0.INTR3.modify(.{ .GPIO24_EDGE_HIGH = 1 });
-        const current_time = time.get_time_since_boot().to_us();
-        if ((current_time - last_trigger_time) > DEBOUCE_TIME_US) {
-            last_trigger_time = current_time;
-            pps2.toggle();
-        }
+    // Button to toggle CH2 PD power
+    if (checkAndClearInterrupt("IO_BANK0", "INTR3", "GPIO24_EDGE_LOW")) {
+        pps2.toggle();
+        return;
     }
 
-    const int_status = peripherals.IO_BANK0.INTR0.read();
-    if (int_status.GPIO4_EDGE_LOW == 1) {
-        defer peripherals.IO_BANK0.INTR0.modify(.{ .GPIO4_EDGE_LOW = 1 });
+    // CH1 PD interrupt
+    if (checkAndClearInterrupt("IO_BANK0", "INTR0", "GPIO4_EDGE_LOW")) {
         pps1.enable(false);
         pps1.configureProtections(PPS.DEFAULT_CONFIG) catch {};
+        return;
     }
-    if (int_status.GPIO5_EDGE_LOW == 1) {
-        defer peripherals.IO_BANK0.INTR0.modify(.{ .GPIO5_EDGE_LOW = 1 });
+
+    // CH2 PD interrupt
+    if (checkAndClearInterrupt("IO_BANK0", "INTR0", "GPIO5_EDGE_LOW")) {
         pps2.enable(false);
         pps2.configureProtections(PPS.DEFAULT_CONFIG) catch {};
+        return;
     }
 }
 
