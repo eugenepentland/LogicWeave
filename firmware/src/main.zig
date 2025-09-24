@@ -17,7 +17,8 @@ const definitions = @import("proto_gen/all.pb.zig");
 const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
 const usb = rp2xxx.usb;
-
+var writer: std.ArrayList(u8) = undefined;
+var ok_msg: definitions.AppMessage = undefined;
 pub const microzig_options = microzig.Options{
     .log_level = .info,
     .logFn = rp2xxx.uart.logFn,
@@ -36,6 +37,7 @@ fn core1() void {
     var buffer: [256]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const allocator = fba.allocator();
+    writer = std.ArrayList(u8).init(allocator);
 
     while (true) {
         // Wait for usb data length in the fifo
@@ -47,20 +49,16 @@ fn core1() void {
         shared_data_spinlock.unlock();
 
         // Get the response
-        var response_data: []const u8 = undefined;
-        if (protocol_handler.handle_incoming_usb(allocator, incoming_data)) |succes_data| {
-            response_data = succes_data;
-        } else |err| {
+        protocol_handler.handle_incoming_usb(allocator, &writer, incoming_data) catch |err| {
             var err_buff: [64]u8 = undefined;
             const formatted_err = std.fmt.bufPrint(err_buff[0..], "{}", .{err}) catch "format error";
-            response_data = protocol_handler.usb_cdc_write_protobuf(.{ .error_response = .{ .message = protobuf.ManagedString.managed(formatted_err) } }, allocator) catch "error";
-        }
-        defer allocator.free(response_data);
+            protocol_handler.usb_cdc_write_protobuf(.{ .error_response = .{ .message = protobuf.ManagedString.managed(formatted_err) } }, &writer) catch {};
+        };
 
         // Send the response
         shared_data_spinlock.lock();
-        std.mem.copyForwards(u8, &shared_usb_tx_buff, response_data);
-        rp2xxx.multicore.fifo.write_blocking(@intCast(response_data.len));
+        //std.mem.copyForwards(u8, &shared_usb_tx_buff, writer.items);
+        rp2xxx.multicore.fifo.write_blocking(@intCast(writer.items.len));
         shared_data_spinlock.unlock();
     }
 }
@@ -113,9 +111,9 @@ fn handleUsbRx() void {
 fn handleUsbTx() void {
     // Writes a response to the fifo if it gets any
     const response_len = rp2xxx.multicore.fifo.read();
-    if (response_len) |len| {
+    if (response_len) |_| {
         shared_data_spinlock.lock();
-        const tx_data = shared_usb_tx_buff[0..len];
+        const tx_data = writer.items;
         usb_cdc_write(tx_data);
         shared_data_spinlock.unlock();
     }

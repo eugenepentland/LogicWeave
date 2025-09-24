@@ -34,8 +34,7 @@
             .hash = "serial-0.0.1-PoeRzI20AABcp4FffI6HXKOL6LcGPKmeqfN4Bna4-YYm", // Updated hash
         },
         .protobuf = .{ //
-            .url = "https://github.com/Arwalk/zig-protobuf//archive/77161cbf10625fea90ee3bf6eee47e6b8c587845.tar.gz",
-            .hash = "protobuf-2.0.0-0e82akObGwBZQtrB7Qb6CTWSrwYKRPJ0M4L0CuTJmJ9G",
+            .path = "lib/zig-protobuf",
         },
         .zfat = .{
             .url = "git+https://github.com/ZigEmbeddedGroup/zfat/?ref=HEAD#758a50721e4aa65a3c3ac16f79e82812893f8766",
