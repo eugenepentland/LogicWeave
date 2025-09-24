@@ -59,9 +59,7 @@ fn checkAndClearInterrupt(
     // 4. Check the specific interrupt flag (e.g., GPIO23_EDGE_LOW) using its name.
     if (@field(intr_status, field_name) == 1) {
         // The interrupt is active. Now we clear it.
-        var clear_mask = std.mem.zeroes(@TypeOf(intr_status));
-        @field(clear_mask, field_name) = 1;
-        intr_reg.modify(clear_mask);
+        intr_reg.modify_one(field_name, 1);
 
         return interruptIsReady();
     }
@@ -101,36 +99,22 @@ fn gpio_interrupt() callconv(.c) void {
     }
 }
 
-// --- Initialization Functions ---
-fn init_pwr_buttons() void {
-    pps1_ctrl_btn.set_function(.sio);
-    pps1_ctrl_btn.set_direction(.in);
-    pps1_ctrl_btn.set_pull(.up);
-    pps1_ctrl_btn.set_schmitt_trigger(.enabled);
+fn setup_io_interrupts(
+    pin: rp2xxx.gpio.Pin,
+    comptime io_bank_name: []const u8,
+    comptime intr_reg_name: []const u8,
+    comptime field_name: []const u8,
+) void {
+    // Setup the GPIO pin as input with schmitt trigger
+    pin.set_function(.sio);
+    pin.set_direction(.in);
+    pin.set_pull(.up);
+    pin.set_schmitt_trigger(.enabled);
 
-    pps2_ctrl_btn.set_function(.sio);
-    pps2_ctrl_btn.set_direction(.in);
-    pps2_ctrl_btn.set_pull(.up);
-    pps2_ctrl_btn.set_schmitt_trigger(.enabled);
-
-    peripherals.IO_BANK0.PROC0_INTE2.modify(.{ .GPIO23_EDGE_LOW = 1 });
-    peripherals.IO_BANK0.PROC0_INTE3.modify(.{ .GPIO24_EDGE_LOW = 1 });
-}
-
-fn init_pd_interrupts() void {
-    const pd1_int = rp2xxx.gpio.num(4);
-    const pd2_int = rp2xxx.gpio.num(5);
-
-    pd1_int.set_function(.sio);
-    pd1_int.set_direction(.in);
-    pd1_int.set_schmitt_trigger(.enabled);
-
-    pd2_int.set_function(.sio);
-    pd2_int.set_direction(.in);
-    pd2_int.set_schmitt_trigger(.enabled);
-
-    peripherals.IO_BANK0.PROC0_INTE0.modify(.{ .GPIO4_EDGE_LOW = 1 });
-    peripherals.IO_BANK0.PROC0_INTE0.modify(.{ .GPIO5_EDGE_LOW = 1 });
+    // Enable the interrupt
+    const io_bank = @field(peripherals, io_bank_name);
+    var intr_reg = @field(io_bank, intr_reg_name);
+    intr_reg.modify_one(field_name, 1);
 }
 
 fn init_gpio_bank_voltage() !void {
@@ -186,8 +170,15 @@ fn sd_init(alloc: std.mem.Allocator) !void {
 
 // A single public init function to be called from main
 pub fn init(alloc: std.mem.Allocator) !void {
-    init_pd_interrupts();
-    init_pwr_buttons();
+    const pd1_int = rp2xxx.gpio.num(4);
+    const pd2_int = rp2xxx.gpio.num(5);
+
+    setup_io_interrupts(pps1_ctrl_btn, "IO_BANK0", "PROC0_INTE2", "GPIO23_EDGE_LOW");
+    setup_io_interrupts(pps2_ctrl_btn, "IO_BANK0", "PROC0_INTE3", "GPIO24_EDGE_LOW");
+
+    setup_io_interrupts(pd1_int, "IO_BANK0", "PROC0_INTE0", "GPIO4_EDGE_LOW");
+    setup_io_interrupts(pd2_int, "IO_BANK0", "PROC0_INTE0", "GPIO5_EDGE_LOW");
+
     try init_gpio_bank_voltage();
     pps_init() catch {};
     try screen_init();
