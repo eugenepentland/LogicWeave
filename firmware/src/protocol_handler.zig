@@ -71,7 +71,6 @@ pub fn milliTo1dpFixed4(milli: u32) [4]u8 {
 
 pub fn handle_incoming_usb(allocator: std.mem.Allocator, writer: *std.ArrayList(u8), input: []const u8) !void {
     const msg = try protobuf.pb_decode(definitions.AppMessage, input, allocator);
-    defer msg.deinit();
 
     // Match on the kind of message
     if (msg.kind) |kind_enum| {
