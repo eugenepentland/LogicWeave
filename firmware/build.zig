@@ -43,21 +43,6 @@ fn build_flash_firmware(b: *Build, optimize: std.builtin.OptimizeMode, target: s
     run_step.dependOn(&run_cmd.step);
 }
 
-fn gen_zig_proto(optimize: std.builtin.OptimizeMode, host_target: Build.ResolvedTarget, b: *Build) *Build.Module {
-    // 2) Host‑side: protoc generation step
-    const pb_host_dep = b.dependency("protobuf", .{
-        .target = host_target,
-        .optimize = optimize,
-    });
-    const protoc_step = protobuf.RunProtocStep.create(b, pb_host_dep.builder, host_target, .{
-        .destination_directory = b.path("src/proto_gen"),
-        .source_files = &.{"all.proto"},
-        .include_directories = &.{"../proto"},
-    });
-    b.getInstallStep().dependOn(&protoc_step.step);
-    return b.createModule(.{ .root_source_file = b.path("src/proto_gen/all.pb.zig") });
-}
-
 fn gen_python_proto(b: *Build) void {
     // Python Protobuf generation step
     const gen_python_proto_cmd = b.addSystemCommand(&.{
@@ -75,41 +60,55 @@ pub fn build(b: *Build) void {
     // 1) Standard build options
     const optimize = .ReleaseFast;
     const host_target = b.standardTargetOptions(.{});
-
-    const proto_module = gen_zig_proto(optimize, host_target, b);
     gen_python_proto(b);
+
+    const protobuf_dep = b.dependency("protobuf", .{
+        .target = host_target,
+        .optimize = optimize,
+    });
+
+    const protoc_step = protobuf.RunProtocStep.create(b, protobuf_dep.builder, host_target, .{
+        .destination_directory = b.path("src/proto_gen"),
+        .source_files = &.{"all.proto"},
+        .include_directories = &.{"../proto"},
+    });
+
+    b.getInstallStep().dependOn(&protoc_step.step);
+
+    const protbuf_defs = b.createModule(.{ .root_source_file = b.path("src/proto_gen/all.pb.zig") });
 
     // 4) Init MicroZig for RP2xxx (e.g. Pico)
     const mz_dep = b.dependency("microzig", .{});
     const mb = microzig.MicroBuild(.{ .rp2xxx = true }).init(b, mz_dep) orelse @panic("MicroZig port not available. Fetch dependencies.");
 
-    // 5) Define Firmware Examples/Targets
-    const examples = [_]Example{
-        .{
-            .name = "logicweave_pico2_arm",
-            .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
-            .file = "src/logicweave.zig",
-            .generic = false,
-        },
-        .{
-            .name = "logicweave_generic_pico2_arm",
-            .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
-            .file = "src/logicweave.zig",
-            .generic = true,
-        },
-        .{
-            .name = "logicweave_generic_pico_arm",
-            .target = mb.ports.rp2xxx.boards.raspberrypi.pico,
-            .file = "src/logicweave.zig",
-            .generic = true,
-        },
-    };
+    const lw_mod = b.addModule("logicweave", .{ .root_source_file = b.path("src/logicweave.zig") });
+    lw_mod.addImport("protobuf", protobuf_dep.module("protobuf"));
+    lw_mod.addImport("protocol", protbuf_defs);
 
     const commit_hash = b.option([]const u8, "GIT_HASH", "The git commit hash") orelse blk: {
         const stdout = b.run(&.{ "git", "rev-parse", "--short=8", "HEAD" });
         break :blk stdout[0 .. stdout.len - 1]; // remove the \n
     };
     const updated_at = b.run(&.{ "git", "log", "-1", "--format=%cd" });
+
+    // ✨ Create and add firmware-specific options dynamically ✨
+    const fw_options = b.addOptions();
+    fw_options.addOption([]const u8, "GIT_HASH", commit_hash);
+    fw_options.addOption([]const u8, "UPDATED_AT", updated_at);
+    // Use the `generic` field directly from the current example
+    fw_options.addOption(bool, "GENERIC", false);
+
+    lw_mod.addOptions("firmware_config", fw_options);
+
+    // 5) Define Firmware Examples/Targets
+    const examples = [_]Example{
+        .{
+            .name = "logicweave_generic_pico2_arm",
+            .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
+            .file = "src/examples/core.zig",
+            .generic = true,
+        },
+    };
 
     // 6) Build loop for firmware examples
     for (examples) |ex| {
@@ -121,17 +120,9 @@ pub fn build(b: *Build) void {
             .root_source_file = b.path(ex.file),
         });
 
-        // ✨ Create and add firmware-specific options dynamically ✨
-        const fw_options = b.addOptions();
-        fw_options.addOption([]const u8, "GIT_HASH", commit_hash);
-        fw_options.addOption([]const u8, "UPDATED_AT", updated_at);
-        // Use the `generic` field directly from the current example
-        fw_options.addOption(bool, "GENERIC", ex.generic);
-
-        fw.add_options("firmware_config", fw_options);
-
         // b) Import your generated protocol definitions into the firmware application
-        fw.add_app_import("protocol", proto_module, .{});
+        //fw.add_app_import("protocol", proto_module, .{});
+        fw.add_app_import("logicweave", lw_mod, .{ .depend_on_microzig = true });
 
         const zig_tgt = b.resolveTargetQuery(ex.target.zig_target);
 
@@ -141,6 +132,7 @@ pub fn build(b: *Build) void {
 
         // d) Import the protobuf runtime into the firmware application
         fw.add_app_import("protobuf", pb_fw_mod, .{});
+        fw.add_options("firmware_config", fw_options);
 
         // f) Install firmware artifacts
         mb.install_firmware(fw, .{});
