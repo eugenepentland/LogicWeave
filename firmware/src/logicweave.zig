@@ -87,35 +87,6 @@ pub fn run() void {
     }
 }
 
-pub fn main() !void {
-    var buffer: [4048]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
-    const allocator = fba.allocator();
-
-    // Initalize the screen, USB PD ports, intterupts for logicweave board
-    if (comptime !firmware_config.GENERIC) {
-        hardware.init(allocator) catch |err| {
-            std.log.err("Hardware init failed: {}", .{err});
-        };
-    }
-    rp2xxx.multicore.launch_core1_with_stack(&core1, &stack);
-
-    // 2. Initialize the USB device
-    const usb_dev = usb.Usb(.{});
-    usb_dev.init_clk();
-    usb_dev.init_device(&usb_cfg.DEVICE_CONFIGURATION) catch unreachable;
-
-    // 4. Main loop
-    while (true) {
-        // Poll for USB events
-        usb_dev.task(false) catch unreachable;
-
-        handleUsbRx();
-        handleUsbTx();
-        handleInterrupts();
-    }
-}
-
 fn handleInterrupts() void {}
 
 fn handleUsbRx() void {
