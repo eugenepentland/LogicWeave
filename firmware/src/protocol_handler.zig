@@ -309,11 +309,6 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, writer: *std.ArrayList(
                 } else {
                     // For the full-featured firmware, handle all other cases
                     switch (kind_enum) {
-                        .sd_info_request => |_| {
-                            try hardware.sd.initialize(20_000_000);
-                            //const capactiy_bytes = (try hardware.sd.readCSD()).capacity_bytes;
-                            return try usb_cdc_write_protobuf(.{ .sd_info_response = .{ .capacity_bytes = 10 } }, writer);
-                        },
                         .write_text_request => |request| {
                             try hardware.g.drawString(request.text.getSlice(), @intCast(request.x), @intCast(request.y));
                             return try usb_cdc_write_protobuf(.{ .write_text_response = .{ .status = 200 } }, writer);

@@ -23,6 +23,9 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
+        .logicweave = .{
+            .path = "src",
+        },
         .foundation_libc = .{
             .path = "lib/microzig/modules/foundation-libc",
         },

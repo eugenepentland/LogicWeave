@@ -19,6 +19,7 @@ const time = rp2xxx.time;
 const usb = rp2xxx.usb;
 var writer: std.ArrayList(u8) = undefined;
 var ok_msg: definitions.AppMessage = undefined;
+
 pub const microzig_options = microzig.Options{
     .log_level = .info,
     .logFn = rp2xxx.uart.logFn,
@@ -65,6 +66,27 @@ fn core1() void {
 
 var stack: [8192]u32 = undefined;
 
+pub fn run() void {
+    // 2. Initialize the USB device
+    const usb_dev = usb.Usb(.{});
+    usb_dev.init_clk();
+    usb_dev.init_device(&usb_cfg.DEVICE_CONFIGURATION) catch unreachable;
+
+    // Start the 2nd core
+    rp2xxx.multicore.launch_core1_with_stack(&core1, &stack);
+
+    // Run the main loop
+    // 4. Main loop
+    while (true) {
+        // Poll for USB events
+        usb_dev.task(false) catch unreachable;
+
+        handleUsbRx();
+        handleUsbTx();
+        handleInterrupts();
+    }
+}
+
 pub fn main() !void {
     var buffer: [4048]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
@@ -94,9 +116,7 @@ pub fn main() !void {
     }
 }
 
-fn handleInterrupts() void {
-
-}
+fn handleInterrupts() void {}
 
 fn handleUsbRx() void {
     // Read in any USB data if there is any

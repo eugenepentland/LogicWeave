@@ -43,12 +43,7 @@ fn build_flash_firmware(b: *Build, optimize: std.builtin.OptimizeMode, target: s
     run_step.dependOn(&run_cmd.step);
 }
 
-// --- Main Build Function ---
-pub fn build(b: *Build) void {
-    // 1) Standard build options
-    const optimize = b.standardOptimizeOption(.{});
-    const host_target = b.standardTargetOptions(.{});
-
+fn gen_zig_proto(optimize: std.builtin.OptimizeMode, host_target: Build.ResolvedTarget, b: *Build) *Build.Module {
     // 2) Host‑side: protoc generation step
     const pb_host_dep = b.dependency("protobuf", .{
         .target = host_target,
@@ -60,21 +55,29 @@ pub fn build(b: *Build) void {
         .include_directories = &.{"../proto"},
     });
     b.getInstallStep().dependOn(&protoc_step.step);
+    return b.createModule(.{ .root_source_file = b.path("src/proto_gen/all.pb.zig") });
+}
 
+fn gen_python_proto(b: *Build) void {
     // Python Protobuf generation step
-    const gen_python_proto = b.addSystemCommand(&.{
+    const gen_python_proto_cmd = b.addSystemCommand(&.{
         "protoc",
         "-I=../proto",
         "--python_out=../software/src/LogicWeave/proto_gen",
         "../proto/all.proto",
     });
-    gen_python_proto.step.name = "gen-python-proto";
-    b.getInstallStep().dependOn(&gen_python_proto.step);
+    gen_python_proto_cmd.step.name = "gen-python-proto";
+    b.getInstallStep().dependOn(&gen_python_proto_cmd.step);
+}
 
-    // 3) Zig‐module for your generated .pb.zig files
-    const proto_module = b.createModule(.{
-        .root_source_file = b.path("src/proto_gen/all.pb.zig"),
-    });
+// --- Main Build Function ---
+pub fn build(b: *Build) void {
+    // 1) Standard build options
+    const optimize = .ReleaseFast;
+    const host_target = b.standardTargetOptions(.{});
+
+    const proto_module = gen_zig_proto(optimize, host_target, b);
+    gen_python_proto(b);
 
     // 4) Init MicroZig for RP2xxx (e.g. Pico)
     const mz_dep = b.dependency("microzig", .{});
@@ -85,19 +88,19 @@ pub fn build(b: *Build) void {
         .{
             .name = "logicweave_pico2_arm",
             .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
-            .file = "src/main.zig",
+            .file = "src/logicweave.zig",
             .generic = false,
         },
         .{
             .name = "logicweave_generic_pico2_arm",
             .target = mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
-            .file = "src/main.zig",
+            .file = "src/logicweave.zig",
             .generic = true,
         },
         .{
             .name = "logicweave_generic_pico_arm",
             .target = mb.ports.rp2xxx.boards.raspberrypi.pico,
-            .file = "src/main.zig",
+            .file = "src/logicweave.zig",
             .generic = true,
         },
     };
@@ -114,7 +117,7 @@ pub fn build(b: *Build) void {
         const fw = mb.add_firmware(.{
             .name = ex.name,
             .target = ex.target,
-            .optimize = optimize,
+            .optimize = .ReleaseFast,
             .root_source_file = b.path(ex.file),
         });
 
@@ -132,54 +135,8 @@ pub fn build(b: *Build) void {
 
         const zig_tgt = b.resolveTargetQuery(ex.target.zig_target);
 
-        const zfat_dep = b.dependency("zfat", .{
-            .target = zig_tgt,
-            .optimize = optimize,
-            .code_page = .us,
-            .@"sector-size" = @as(u32, 512),
-            .@"volume-count" = @as(u32, 1),
-            // .@"volume-names" = @as([]const u8, "a,b,c,h,z"), // TODO(fqu): Requires VolToPart to be defined
-            .@"no-libc" = true,
-            // Enable features:
-            .find = true,
-            .mkfs = true,
-            .fastseek = true,
-            .expand = true,
-            .chmod = true,
-            .label = true,
-            .reentrant = false,
-            .forward = true,
-            .relative_path_api = .enabled_with_getcwd,
-            // .multi_partition = true, // TODO(fqu): Requires VolToPart to be defined
-            .lba64 = true,
-            .use_trim = true,
-            .exfat = true,
-            .@"static-rtc" = @as([]const u8, "2025-07-22"),
-        });
-
-        const zfat_mod = zfat_dep.module("zfat");
-
-        // Add Foundation Libc and get its paths
-        const libc_dep = b.dependency("foundation_libc", .{
-            .target = zig_tgt,
-            .optimize = optimize,
-            .single_threaded = true,
-        });
-
-        const libc = libc_dep.artifact("foundation");
-        const tree = libc.getEmittedIncludeTree();
-
-        //zfat_mod.addIncludePath(tree);
-        zfat_mod.link_objects.items[0].other_step.root_module.addIncludePath(tree);
-        fw.artifact.linkLibrary(libc);
-
-        fw.add_app_import("zfat", zfat_mod, .{});
-
         // c) Build the protobuf *runtime* library for the firmware's target
-        const pb_fw_dep = b.dependency("protobuf", .{
-            .target = zig_tgt,
-            .optimize = optimize,
-        });
+        const pb_fw_dep = b.dependency("protobuf", .{ .target = zig_tgt, .optimize = optimize });
         const pb_fw_mod = pb_fw_dep.module("protobuf");
 
         // d) Import the protobuf runtime into the firmware application

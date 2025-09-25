@@ -5,7 +5,6 @@ const Screen = @import("devices/E2206KS0E1.zig");
 const PPS = @import("devices/ap33772s.zig");
 const Graphics = @import("graphics.zig");
 const definitions = @import("proto_gen/all.pb.zig"); // For BankVoltage enum
-const SD = @import("devices/sd.zig");
 const fatfs = @import("zfat");
 
 const rp2xxx = microzig.hal;
@@ -19,8 +18,6 @@ pub var g: Graphics.Graphics = undefined;
 pub var pps1: PPS = undefined;
 pub var pps2: PPS = undefined;
 pub var screen: Screen = undefined;
-pub var sd: SD.SD_Driver = undefined;
-pub var sd_disk: SD.SdCardDisk = undefined;
 pub var global_fs: fatfs.FileSystem = undefined;
 pub var log_commands: bool = false;
 pub var log_filename_buffer: [32]u8 = undefined;
@@ -156,20 +153,8 @@ pub fn update_screen() !void {
     g.refreshFrameBuffer();
 }
 
-fn sd_init(alloc: std.mem.Allocator) !void {
-    sd = try SD.SD_Driver.init(
-        alloc,
-        rp2xxx.gpio.num(9),
-        rp2xxx.gpio.num(10),
-        rp2xxx.gpio.num(11),
-        rp2xxx.gpio.num(8),
-        rp2xxx.spi.instance.num(1),
-        100_000,
-    );
-}
-
 // A single public init function to be called from main
-pub fn init(alloc: std.mem.Allocator) !void {
+pub fn init(_: std.mem.Allocator) !void {
     const pd1_int = rp2xxx.gpio.num(4);
     const pd2_int = rp2xxx.gpio.num(5);
 
@@ -182,7 +167,6 @@ pub fn init(alloc: std.mem.Allocator) !void {
     try init_gpio_bank_voltage();
     pps_init() catch {};
     try screen_init();
-    try sd_init(alloc);
 
     interrupt.enable(.IO_IRQ_BANK0);
     interrupt.globally_enable();
