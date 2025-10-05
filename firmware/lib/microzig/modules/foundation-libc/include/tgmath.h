@@ -1,4 +1,0 @@
-#ifndef _FOUNDATION_LIBC_TGMATH_H_
-#define _FOUNDATION_LIBC_TGMATH_H_
-
-#endif

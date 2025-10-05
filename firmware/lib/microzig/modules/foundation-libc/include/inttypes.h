@@ -1,4 +1,0 @@
-#ifndef _FOUNDATION_LIBC_INTTYPES_H_
-#define _FOUNDATION_LIBC_INTTYPES_H_
-
-#endif

@@ -1,3 +1,0 @@
-<extend template="base.shtml">
-<title id="title" var="$page.title"></title>
-<div id="main" :html="$page.content()"></div>

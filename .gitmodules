@@ -1,3 +1,0 @@
-[submodule "firmware/firmware/lib/zig-protobuf"]
-	path = firmware/firmware/lib/zig-protobuf
-	url = https://github.com/Arwalk/zig-protobuf.git
