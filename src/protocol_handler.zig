@@ -205,8 +205,6 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
 
                 return encode_message(writer, allocator, .{ .spi_read_response = .{ .data = buff } });
             },
-
-            // Generic I2C functions (always included)
             .i2c_setup_request => |request| {
                 const sda_pin = getGPIO(request.sda_pin);
                 const scl_pin = getGPIO(request.scl_pin);
@@ -251,11 +249,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 }
                 return encode_message(writer, allocator, .{ .i2c_setup_response = .{ .status = 200 } });
             },
-
-            // Feature-specific functions (conditionally compiled)
-            // These will only be included if GENERIC_FIRMWARE is 'false'
-            else => return error.InvalidMessage,
+            else => return,
         }
     }
-    return error.InvalidMessage;
 }

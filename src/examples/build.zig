@@ -86,7 +86,8 @@ pub fn build(b: *Build) void {
     // Now, just tell the firmware about your logicweave module.
     fw.add_app_import("logicweave", lw_mod, .{ .depend_on_microzig = true });
 
-    mb.install_firmware(fw, .{});
+    // Create an install step for the firmware and capture the artifact object.
+    const fw_install = mb.add_install_firmware(fw, .{});
 
     const flash_mod = b.addModule("flash", .{
         .root_source_file = b.path("tools/flash.zig"),
@@ -114,19 +115,21 @@ pub fn build(b: *Build) void {
     b.installArtifact(flash_tool);
 
     // 2. Create the 'flash' step
-    const flash_step = b.step("flash", "Flashes the selected firmware to the target device.");
+    const flash_step = b.step("flash", "Builds and flashes the selected firmware to the target device.");
 
     // 3. Create the 'RunStep' that executes the flash tool
     const flash_command = b.addRunArtifact(flash_tool);
 
     // Set the executable to be the compiled 'flash_tool'
     flash_command.step.dependOn(&flash_tool.step);
-    flash_command.step.dependOn(&fw.artifact.step); // Ensure firmware is built before flashing
+    flash_command.step.dependOn(&fw_install.step);
 
-    const firmware_output_path = ex.name;
-
-    // Add the firmware output file as an argument to the flash tool
-    flash_command.addArgs(&.{ "--file", firmware_output_path });
+    // Add the firmware output file as an argument to the flash tool.
+    // By passing the `fw_install` artifact directly, Zig's build system
+    // understands the dependency and will substitute the correct path at runtime.
+    // This makes any other explicit `dependOn` for the firmware step redundant.
+    flash_command.addArg("--file");
+    flash_command.addArg(ex.name);
 
     // Add the run command to the flash step
     flash_step.dependOn(&flash_command.step);

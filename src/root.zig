@@ -16,12 +16,13 @@ const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
 const usb = rp2xxx.usb;
 
-var writer: std.Io.Writer = .fixed(&usb_tx_buff);
+pub var usb_writer: std.Io.Writer = .fixed(&usb_tx_buff);
 var shared_usb_rx_buff: [128]u8 = undefined;
 var shared_usb_tx_buff: [128]u8 = undefined;
 var usb_rx_buff: [128]u8 = undefined;
 var usb_tx_buff: [128]u8 = undefined;
 
+pub var custom_usb_handler: ?*const fn (std.Io.Reader) void = null;
 const shared_data_spinlock = rp2xxx.multicore.Spinlock.init(0);
 
 const LogicWeave = @This();
@@ -57,21 +58,29 @@ fn handleProcessRx(allocator: std.mem.Allocator) void {
         var reader: std.Io.Reader = std.Io.Reader.fixed(incoming_data);
 
         // Get the response kind
-        protocol_handler.handle_incoming_usb(allocator, &reader, &writer) catch |err| {
-            var err_buff: [32]u8 = undefined;
+        protocol_handler.handle_incoming_usb(allocator, &reader, &usb_writer) catch |err| {
+            var err_buff: [64]u8 = undefined;
             const formatted_err = std.fmt.bufPrint(err_buff[0..], "Handle Err: {any}", .{err}) catch "format error";
-            protocol_handler.encode_message(&writer, allocator, .{ .error_response = .{ .message = formatted_err } }) catch {
-                writer.writeAll(&[_]u8{2}) catch {};
+            protocol_handler.encode_message(&usb_writer, allocator, .{ .error_response = .{ .message = formatted_err } }) catch {
+                usb_writer.writeAll(&[_]u8{22}) catch {};
             };
         };
 
+        // Try the custom usb handler if no data is in the usb_writer
+        if (usb_writer.buffered().len == 0) {
+            if (custom_usb_handler) |handler| {
+                handler(reader);
+            }
+        }
+
         // Copy it over to the shared tx buffer
-        usbTxWrite(writer.buffered());
-        writer.end = 0;
+        usbTxWrite(usb_writer.buffered());
+        usb_writer.end = 0;
     }
 }
 
 pub fn usbTxWrite(buff: []const u8) void {
+    if (buff.len == 0) return;
     shared_data_spinlock.lock();
     defer shared_data_spinlock.unlock();
 
