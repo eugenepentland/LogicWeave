@@ -1,7 +1,7 @@
 // src/protocol_handler.zig
 const std = @import("std");
 const microzig = @import("microzig");
-const definitions = @import("proto_gen/all.pb.zig");
+const messages = @import("proto_gen/all.pb.zig");
 const protobuf = @import("protobuf");
 const firmware_config = @import("firmware_config");
 // Import our new modules
@@ -17,12 +17,12 @@ pub fn getGPIO(gpio_enum: u32) rp2xxx.gpio.Pin {
     return rp2xxx.gpio.num(gpio_num);
 }
 
-pub fn encode_message(writer: *std.Io.Writer, allocator: std.mem.Allocator, kind: definitions.AppMessage.kind_union) !void {
-    try protobuf.encode(writer, allocator, definitions.AppMessage{ .kind = kind });
+pub fn encode_message(writer: *std.Io.Writer, allocator: std.mem.Allocator, kind: messages.AppMessage.kind_union) !void {
+    try protobuf.encode(writer, allocator, messages.AppMessage{ .kind = kind });
 }
 
 pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader, writer: *std.Io.Writer) !void {
-    var msg = try protobuf.decode(definitions.AppMessage, reader, allocator);
+    var msg = try protobuf.decode(messages.AppMessage, reader, allocator);
     defer msg.deinit(allocator);
 
     // Match on the kind of message
@@ -33,6 +33,10 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     .hash = firmware_config.GIT_HASH,
                     .version = firmware_config.version,
                 } });
+            },
+            .usb_bootloader_request => {
+                rp2xxx.rom.reset_to_usb_boot();
+                return;
             },
             .echo_message => |content| {
                 return encode_message(writer, allocator, .{ .echo_message = .{ .message = content.message } });

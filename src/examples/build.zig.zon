@@ -30,6 +30,14 @@
             .url = "https://github.com/ZigEmbeddedGroup/microzig/releases/download/0.15.0/microzig.tar.gz",
             .hash = "microzig-0.15.0-D20YSTUgCADpOaRtQ4SOk0HJ_E4342rgS9m3LQGhITbd",
         },
+        .serial = .{
+            .url = "https://github.com/ZigEmbeddedGroup/serial/archive/refs/heads/master.tar.gz",
+            .hash = "serial-0.0.1-PoeRzF60AAAN8Iu0yXTIX-t3DVzsnmN7vWHKM2HA2Zbq",
+        },
+        .protobuf = .{
+            .url = "https://github.com/Arwalk/zig-protobuf/archive/refs/tags/v3.0.0.tar.gz",
+            .hash = "protobuf-2.0.0-0e82an3rJACrCrLX7sohjL3qQIcDUV_x7NgEo1AORXUD",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.

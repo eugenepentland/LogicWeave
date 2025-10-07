@@ -39,7 +39,7 @@ const examples = [_]Example{
 pub fn build(b: *Build) void {
     // 1. Define and get the example name from a CLI option
     const example_name_option = b.option([]const u8, "example-name", "The name of the example to build (e.g., 'logicweave_pico')");
-    
+
     // Check if the user provided the option
     const example_name = if (example_name_option) |name| name else {
         std.debug.print("Error: Please provide an example name using -Dexample-name=<name>\n", .{});
@@ -63,7 +63,7 @@ pub fn build(b: *Build) void {
     };
 
     // --- Steps 3 and 4: Dependencies and Building the Single Firmware ---
-    
+
     const lw_dep = b.dependency("logicweave", .{});
     const mz_dep = b.dependency("microzig", .{});
 
@@ -71,14 +71,14 @@ pub fn build(b: *Build) void {
     const lw_mod = lw_dep.module("logicweave");
 
     // Build only the selected example
-    const target = switch (ex.target) {
+    const pico_target = switch (ex.target) {
         .RP2040 => mb.ports.rp2xxx.boards.raspberrypi.pico,
         .RP2350 => mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
     };
 
     const fw = mb.add_firmware(.{
         .name = ex.name,
-        .target = target,
+        .target = pico_target,
         .optimize = .ReleaseFast,
         .root_source_file = b.path(ex.file),
     });
@@ -87,4 +87,47 @@ pub fn build(b: *Build) void {
     fw.add_app_import("logicweave", lw_mod, .{ .depend_on_microzig = true });
 
     mb.install_firmware(fw, .{});
+
+    const flash_mod = b.addModule("flash", .{
+        .root_source_file = b.path("tools/flash.zig"),
+        .target = b.standardTargetOptions(.{}),
+    });
+
+    // 1. Build the 'flash.zig' utility as an executable
+    const flash_tool = b.addExecutable(.{
+        .name = "flash",
+        .root_module = flash_mod,
+    });
+
+    const pb_host_dep = b.dependency("protobuf", .{});
+
+    flash_tool.root_module.addImport("protobuf", pb_host_dep.module("protobuf"));
+
+    const messages_mod = b.createModule(.{ .root_source_file = b.path("../proto_gen/all.pb.zig") });
+    messages_mod.addImport("protobuf", pb_host_dep.module("protobuf"));
+
+    flash_tool.root_module.addImport("messages", messages_mod);
+
+    const serial = b.dependency("serial", .{});
+    flash_tool.root_module.addImport("serial", serial.module("serial"));
+
+    b.installArtifact(flash_tool);
+
+    // 2. Create the 'flash' step
+    const flash_step = b.step("flash", "Flashes the selected firmware to the target device.");
+
+    // 3. Create the 'RunStep' that executes the flash tool
+    const flash_command = b.addRunArtifact(flash_tool);
+
+    // Set the executable to be the compiled 'flash_tool'
+    flash_command.step.dependOn(&flash_tool.step);
+    flash_command.step.dependOn(&fw.artifact.step); // Ensure firmware is built before flashing
+
+    const firmware_output_path = ex.name;
+
+    // Add the firmware output file as an argument to the flash tool
+    flash_command.addArgs(&.{ "--file", firmware_output_path });
+
+    // Add the run command to the flash step
+    flash_step.dependOn(&flash_command.step);
 }

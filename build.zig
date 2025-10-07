@@ -1,15 +1,8 @@
 const std = @import("std");
-const microzig = @import("microzig");
 const protobuf = @import("protobuf");
 const zon = @import("build.zig.zon");
 const Build = std.Build;
-const Module = Build.Module;
 
-// Use the definition provided by the user
-const Target = microzig.Target;
-const HardwareAbstractionLayer = microzig.HardwareAbstractionLayer;
-
-// --- Main Build Function ---
 pub fn build(b: *Build) void {
     const host_target = b.standardTargetOptions(.{});
     const lw_mod = b.addModule("logicweave", .{ .root_source_file = b.path("src/root.zig") });

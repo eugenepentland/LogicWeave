@@ -2,8 +2,8 @@
 const std = @import("std");
 const microzig = @import("microzig");
 const firmware_config = @import("firmware_config");
-const protobuf = @import("protobuf");
-const definitions = @import("proto_gen/all.pb.zig");
+pub const protobuf = @import("protobuf");
+pub const messages = @import("proto_gen/all.pb.zig");
 
 // Import our new modules
 const usb_cfg = @import("usb_config.zig");
