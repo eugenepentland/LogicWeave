@@ -10,7 +10,6 @@ pub fn main() !void {
     const allocator = arena.allocator();
 
     const uf2_file_path = try get_firmware_path(allocator);
-    std.log.info("{s}", .{uf2_file_path});
 
     // Put the device into the USB bootloader
     if (try get_device_port(allocator)) |port_name| {
@@ -70,7 +69,7 @@ fn get_firmware_path(allocator: std.mem.Allocator) ![]u8 {
         return error.NoFileArgument;
     }
 
-    return try std.mem.concat(allocator, u8, &[_][]const u8{ "zig-out/firmware/", file_name, ".uf2" });
+    return try allocator.dupe(u8, file_name);
 }
 
 pub fn set_usb_boot(port_name: []const u8, allocator: std.mem.Allocator) !void {

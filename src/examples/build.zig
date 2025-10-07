@@ -129,7 +129,11 @@ pub fn build(b: *Build) void {
     // understands the dependency and will substitute the correct path at runtime.
     // This makes any other explicit `dependOn` for the firmware step redundant.
     flash_command.addArg("--file");
-    flash_command.addArg(ex.name);
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const file_path = std.mem.concat(allocator, u8, &[_][]const u8{ "zig-out/firmware/", ex.name, ".uf2" }) catch "zig-out/firmware/logicweave_pico2_arm.uf2";
+    flash_command.addArg(file_path);
 
     // Add the run command to the flash step
     flash_step.dependOn(&flash_command.step);
