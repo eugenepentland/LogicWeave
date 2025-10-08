@@ -22,7 +22,7 @@ var shared_usb_tx_buff: [128]u8 = undefined;
 var usb_rx_buff: [128]u8 = undefined;
 var usb_tx_buff: [128]u8 = undefined;
 
-pub var custom_usb_handler: ?*const fn (std.Io.Reader) void = null;
+pub var custom_usb_handler: ?*const fn (std.mem.Allocator, *std.Io.Reader, *std.Io.Writer) void = null;
 const shared_data_spinlock = rp2xxx.multicore.Spinlock.init(0);
 
 const LogicWeave = @This();
@@ -69,7 +69,7 @@ fn handleProcessRx(allocator: std.mem.Allocator) void {
         // Try the custom usb handler if no data is in the usb_writer
         if (usb_writer.buffered().len == 0) {
             if (custom_usb_handler) |handler| {
-                handler(reader);
+                handler(allocator, &reader, &usb_writer);
             }
         }
 

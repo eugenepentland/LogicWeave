@@ -1,8 +1,8 @@
 const lw = @import("logicweave");
 const std = @import("std");
 
-fn echo_data(reader: std.Io.Reader) void {
-    lw.usb_writer.writeAll(reader.buffer) catch {};
+fn echo_data(_: std.mem.Allocator, reader: *std.Io.Reader, writer: *std.Io.Writer) void {
+    writer.writeAll(reader.buffer) catch {};
 }
 
 pub fn main() !void {

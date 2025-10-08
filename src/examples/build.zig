@@ -29,6 +29,11 @@ const examples = [_]Example{
         .file = "src/pico.zig",
     },
     .{
+        .name = "custom_handler",
+        .target = .RP2350,
+        .file = "src/custom_usb_handler.zig",
+    },
+    .{
         .name = "logicweave_pico",
         .target = .RP2040,
         .file = "src/pico.zig",
