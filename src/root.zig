@@ -69,7 +69,8 @@ fn handleProcessRx(allocator: std.mem.Allocator) void {
         // Try the custom usb handler if no data is in the usb_writer
         if (usb_writer.buffered().len == 0) {
             if (custom_usb_handler) |handler| {
-                handler(allocator, &reader, &usb_writer);
+                var reader2 = std.Io.Reader.fixed(incoming_data);
+                handler(allocator, &reader2, &usb_writer);
             }
         }
 
