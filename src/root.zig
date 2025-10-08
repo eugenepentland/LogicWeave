@@ -36,7 +36,7 @@ fn panic(message: []const u8, s: ?*std.builtin.StackTrace, _: ?usize) noreturn {
 
 fn core1() void {
     // 1. Setup allocator for protocol handler
-    var buff: [64]u8 = undefined;
+    var buff: [512]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buff);
     const allocator = fba.allocator();
 
