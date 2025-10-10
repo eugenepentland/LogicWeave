@@ -67,7 +67,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     },
                     else => {}, // Handle other modes if necessary, or make this an error
                 }
-                return encode_message(writer, allocator, .{ .gpio_write_response = .{ .status = 200 } });
+                return encode_message(writer, allocator, .{ .gpio_mode_response = .{ .status = 200 } });
             },
             .uart_setup_request => |request| {
                 const tx_pin = getGPIO(request.tx_pin);
@@ -82,7 +82,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     .baud_rate = @intCast(request.baud_rate),
                     .clock_config = rp2xxx.clock_config,
                 });
-                return encode_message(writer, allocator, .{ .gpio_write_response = .{ .status = 200 } });
+                return encode_message(writer, allocator, .{ .uart_setup_response = .{ .status = 200 } });
             },
             .uart_write_request => |request| {
                 const uart = rp2xxx.uart.instance.num(@intCast(request.instance_num));
@@ -91,7 +91,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 uart.write_blocking(data, Duration.from_ms(@intCast(request.timeout_ms))) catch {
                     uart.clear_errors();
                 };
-                return encode_message(writer, allocator, .{ .gpio_write_response = .{ .status = 200 } });
+                return encode_message(writer, allocator, .{ .uart_write_response = .{ .status = 200 } });
             },
             .uart_read_request => |request| {
                 const uart = rp2xxx.uart.instance.num(@intCast(request.instance_num));
@@ -168,7 +168,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 // 4. End the transaction by setting Chip Select high
                 cs_pin.put(1);
 
-                return encode_message(writer, allocator, .{ .spi_setup_response = .{ .status = 200 } });
+                return encode_message(writer, allocator, .{ .soft_spi_write_response = .{ .status = 200 } });
             },
             .spi_write_request => |request| {
                 const spi_instance = rp2xxx.spi.instance.num(@truncate(request.instance_num));
@@ -184,7 +184,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     spi_instance.write_blocking(u8, request.data);
                 }
 
-                return encode_message(writer, allocator, .{ .spi_setup_response = .{ .status = 200 } });
+                return encode_message(writer, allocator, .{ .spi_write_response = .{ .status = 200 } });
             },
             .spi_read_request => |request| {
                 const buff: []u8 = try allocator.alloc(u8, @truncate(request.byte_count));
@@ -237,7 +237,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 const i2c_instance = rp2xxx.i2c.instance.num(@truncate(request.instance_num));
                 const device_address: u7 = @truncate(request.device_address);
                 try i2c_instance.write_blocking(@enumFromInt(device_address), request.data, null);
-                return encode_message(writer, allocator, .{ .i2c_setup_response = .{ .status = 200 } });
+                return encode_message(writer, allocator, .{ .i2c_write_response = .{ .status = 200 } });
             },
             .gpio_pin_pull_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
@@ -247,7 +247,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     .None => pin.set_pull(.disabled),
                     else => return error.InvalidPullState,
                 }
-                return encode_message(writer, allocator, .{ .i2c_setup_response = .{ .status = 200 } });
+                return encode_message(writer, allocator, .{ .gpio_pin_pull_response = .{ .status = 200 } });
             },
             else => return,
         }

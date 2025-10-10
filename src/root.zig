@@ -61,9 +61,7 @@ fn handleProcessRx(allocator: std.mem.Allocator) void {
         protocol_handler.handle_incoming_usb(allocator, &reader, &usb_writer) catch |err| {
             var err_buff: [64]u8 = undefined;
             const formatted_err = std.fmt.bufPrint(err_buff[0..], "Handle Err: {any}", .{err}) catch "format error";
-            protocol_handler.encode_message(&usb_writer, allocator, .{ .error_response = .{ .message = formatted_err } }) catch {
-                usb_writer.writeAll(&[_]u8{22}) catch {};
-            };
+            protocol_handler.encode_message(&usb_writer, allocator, .{ .error_response = .{ .message = formatted_err } }) catch {};
         };
 
         // Try the custom usb handler if no data is in the usb_writer
