@@ -10,6 +10,7 @@ const usb_cfg = @import("usb_config.zig");
 const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
 const Duration = microzig.drivers.time.Duration;
+const has_rp2350b = rp2xxx.compatibility.has_rp2350b;
 
 // --- Public Hardware Control Functions ---
 pub fn getGPIO(gpio_enum: u32) rp2xxx.gpio.Pin {
@@ -19,6 +20,59 @@ pub fn getGPIO(gpio_enum: u32) rp2xxx.gpio.Pin {
 
 pub fn encode_message(writer: *std.Io.Writer, allocator: std.mem.Allocator, kind: messages.AppMessage.kind_union) !void {
     try protobuf.encode(writer, allocator, messages.AppMessage{ .kind = kind });
+}
+
+// In main.zig or pwm_utils.zig
+const pwm = microzig.hal.pwm;
+const pins = microzig.hal.pins;
+
+// A wrapper struct to hold the slice and channel together
+pub const PwmInfo = struct {
+    slice: pwm.Slice,
+    channel: pwm.Channel,
+};
+
+// This function replicates the core logic from pins.zig to find the PWM mapping.
+pub fn get_pwm(gpio_num: u6) ?rp2xxx.pwm.Pwm {
+    const channel: rp2xxx.pwm.Channel = if (gpio_num % 2 == 0) .a else .b;
+    var slice_int: u6 = 0;
+
+    if (0 <= gpio_num and gpio_num <= 31) {
+        const offset = gpio_num % 16;
+        slice_int = offset / 2;
+    } else if (32 <= gpio_num and gpio_num <= 47) {
+        const base_slice = 8;
+        const offset = (gpio_num - 32) % 8;
+        slice_int = base_slice + offset / 2;
+    } else {
+        return null;
+    }
+
+    return .{
+        .slice_number = @intCast(slice_int),
+        .channel = channel,
+    };
+}
+
+/// Converts a physical GPIO pin number to its corresponding ADC Input channel.
+pub fn gpio_to_adc_input(pin_num: u8) !rp2xxx.adc.Input {
+    if (has_rp2350b) {
+        // RP2350B: ADC pins are GPIO40 through GPIO47
+        if (pin_num >= 40 and pin_num <= 47) {
+            const channel_num = pin_num - 40;
+            return @as(rp2xxx.adc.Input, @enumFromInt(channel_num));
+        } else {
+            return error.NotAnAdcPin;
+        }
+    } else {
+        // RP2040 / RP2350A: ADC pins are GPIO26 through GPIO29
+        if (pin_num >= 26 and pin_num <= 29) {
+            const channel_num = pin_num - 26;
+            return @as(rp2xxx.adc.Input, @enumFromInt(channel_num));
+        } else {
+            return error.NotAnAdcPin2;
+        }
+    }
 }
 
 pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader, writer: *std.Io.Writer) !void {
@@ -38,18 +92,44 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 rp2xxx.rom.reset_to_usb_boot();
                 return;
             },
-            .echo_message => |content| {
-                return encode_message(writer, allocator, .{ .echo_message = .{ .message = content.message } });
-            },
             .gpio_read_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
                 const state = pin.read();
                 return encode_message(writer, allocator, .{ .gpio_read_response = .{ .state = state != 0 } });
             },
+            .adc_read_request => |request| {
+                const input = try gpio_to_adc_input(@intCast(request.gpio_pin));
+                rp2xxx.adc.configure_gpio_pin_num(input);
+                rp2xxx.adc.apply(.{});
+                rp2xxx.adc.select_input(input);
+
+                const sample = try rp2xxx.adc.convert_one_shot_blocking(input);
+                return encode_message(writer, allocator, .{ .adc_read_response = .{ .sample = @intCast(sample) } });
+            },
             .gpio_write_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
                 pin.put(@intFromBool(request.state));
                 return encode_message(writer, allocator, .{ .gpio_write_response = .{ .status = 200 } });
+            },
+            .pwm_setup_request => |request| {
+                const pin = getGPIO(request.gpio_pin);
+                pin.set_function(.pwm);
+                const pwm_ch = get_pwm(@intCast(request.gpio_pin)) orelse {
+                    return error.InvalidInput;
+                };
+                pwm_ch.slice().set_wrap(@intCast(request.wrap));
+                if (request.clock_div_int > 0 or request.clock_div_frac > 0) {
+                    pwm_ch.slice().set_clk_div(@intCast(request.clock_div_int), @intCast(request.clock_div_frac));
+                }
+                pwm_ch.slice().enable();
+                return encode_message(writer, allocator, .{ .pwm_setup_response = .{ .status = 200 } });
+            },
+            .pwm_set_level_request => |request| {
+                const pwm_ch = get_pwm(@intCast(request.gpio_pin)) orelse {
+                    return error.InvalidInput;
+                };
+                pwm_ch.set_level(@intCast(request.level));
+                return encode_message(writer, allocator, .{ .pwm_set_level_response = .{ .status = 200 } });
             },
             .gpio_mode_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
@@ -62,8 +142,8 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                         pin.set_function(.sio);
                         pin.set_direction(.out);
                     },
-                    .pwm => {
-                        pin.set_function(.pwm);
+                    .disabled => {
+                        pin.set_function(.disabled);
                     },
                     else => {}, // Handle other modes if necessary, or make this an error
                 }
@@ -120,55 +200,6 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 try spi_instance.apply(.{ .clock_config = rp2xxx.clock_config });
 
                 return encode_message(writer, allocator, .{ .spi_setup_response = .{ .status = 200 } });
-            },
-            .soft_spi_write_request => |request| {
-                // Get GPIO pins from the request
-                const cs_pin = getGPIO(request.cs_pin);
-                const sclk_pin = getGPIO(request.sclk_pin);
-                const mosi_pin = getGPIO(request.mosi_pin);
-                const data_slice = request.data;
-
-                // Configure all pins for software-controlled output
-                inline for (&.{ cs_pin, mosi_pin, sclk_pin }) |pin| {
-                    pin.set_function(.sio);
-                    pin.set_direction(.out);
-                }
-
-                // Set initial pin states: CS is high (inactive), SCLK is low (idle for Mode 0)
-                cs_pin.put(1);
-                sclk_pin.put(0);
-
-                // 1. Begin transaction by setting Chip Select low
-                cs_pin.put(0);
-                time.sleep_us(1); // Optional small delay for the peripheral to get ready
-
-                // 2. Loop through each byte in the data slice
-                for (data_slice) |byte_to_send| {
-                    // 3. Loop through each bit in the byte, Most Significant Bit (MSB) first
-                    var bit_index: u4 = 8;
-                    while (bit_index > 0) {
-                        bit_index -= 1;
-
-                        // Isolate the MSB for the current iteration
-                        const bit_to_send = (byte_to_send >> @intCast(bit_index)) & 1;
-
-                        // Set the data line (MOSI) to the correct value
-                        mosi_pin.put(@intCast(bit_to_send));
-
-                        // Pulse the clock high. The slave device reads the MOSI value on this rising edge.
-                        sclk_pin.put(1);
-                        time.sleep_us(1); // This delay controls the clock's high-time (SPI speed)
-
-                        // Bring the clock low again.
-                        sclk_pin.put(0);
-                        time.sleep_us(1); // This delay controls the clock's low-time (SPI speed)
-                    }
-                }
-
-                // 4. End the transaction by setting Chip Select high
-                cs_pin.put(1);
-
-                return encode_message(writer, allocator, .{ .soft_spi_write_response = .{ .status = 200 } });
             },
             .spi_write_request => |request| {
                 const spi_instance = rp2xxx.spi.instance.num(@truncate(request.instance_num));
@@ -229,9 +260,20 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 const i2c_instance = rp2xxx.i2c.instance.num(@truncate(request.instance_num));
                 const device_address: u7 = @truncate(request.device_address);
 
-                i2c_instance.write_then_read_blocking(@enumFromInt(device_address), request.data, buff, Duration.from_ms(100)) catch {};
+                i2c_instance.read_blocking(@enumFromInt(device_address), buff, Duration.from_ms(100)) catch {};
 
                 return encode_message(writer, allocator, .{ .i2c_read_response = .{ .data = buff } });
+            },
+            .i2c_write_then_read_request => |request| {
+                const buff: []u8 = try allocator.alloc(u8, @truncate(request.byte_count));
+                defer allocator.free(buff);
+
+                const i2c_instance = rp2xxx.i2c.instance.num(@truncate(request.instance_num));
+                const device_address: u7 = @truncate(request.device_address);
+
+                i2c_instance.write_then_read_blocking(@enumFromInt(device_address), request.data, buff, Duration.from_ms(100)) catch {};
+
+                return encode_message(writer, allocator, .{ .i2c_write_then_read_response = .{ .data = buff } });
             },
             .i2c_write_request => |request| {
                 const i2c_instance = rp2xxx.i2c.instance.num(@truncate(request.instance_num));

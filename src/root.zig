@@ -27,8 +27,8 @@ const shared_data_spinlock = rp2xxx.multicore.Spinlock.init(0);
 
 const LogicWeave = @This();
 
-fn panic(message: []const u8, s: ?*std.builtin.StackTrace, _: ?usize) noreturn {
-    std.log.err("The RP2350 has crashed: {s}. {any}", .{ message, s });
+fn panic(_: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
+    //std.log.err("The RP2350 has crashed: {s}. {any}", .{ message, s });
     @breakpoint();
     rp2xxx.rom.reboot_to_bootsel_now() catch {};
     while (true) {}
@@ -44,7 +44,6 @@ fn core1() void {
         // Wait for usb data length in the fifo
         handleProcessRx(allocator);
         //handleInterrupts();
-        //defer arena.deinit();
     }
 }
 

@@ -2,7 +2,6 @@ const std = @import("std");
 const microzig = @import("microzig");
 const Build = std.Build;
 const Module = Build.Module;
-
 // Use the definition provided by the user
 const Target = microzig.Target;
 
@@ -84,6 +83,10 @@ pub fn build(b: *Build) void {
     const fw = mb.add_firmware(.{
         .name = ex.name,
         .target = pico_target,
+        .board = .{
+            .name = "rp2350b",
+            .root_source_file = b.path("rp2350b.zig"),
+        },
         .optimize = .ReleaseFast,
         .root_source_file = b.path(ex.file),
     });
