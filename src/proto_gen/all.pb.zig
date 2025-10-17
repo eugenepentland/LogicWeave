@@ -1857,12 +1857,75 @@ pub const FirmwareInfoRequest = struct {
 pub const FirmwareInfoResponse = struct {
     hash: []const u8 = &.{},
     version: []const u8 = &.{},
-    updated_at: []const u8 = &.{},
+    serial_number: []const u8 = &.{},
 
     pub const _desc_table = .{
         .hash = fd(1, .{ .scalar = .string }),
         .version = fd(2, .{ .scalar = .string }),
-        .updated_at = fd(3, .{ .scalar = .string }),
+        .serial_number = fd(3, .{ .scalar = .string }),
+    };
+
+    pub fn encode(
+        self: @This(),
+        writer: *std.Io.Writer,
+        allocator: std.mem.Allocator,
+    ) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+        return protobuf.encode(writer, allocator, self);
+    }
+
+    pub fn decode(
+        reader: *std.Io.Reader,
+        allocator: std.mem.Allocator,
+    ) (protobuf.DecodingError || std.Io.Reader.Error || std.mem.Allocator.Error)!@This() {
+        return protobuf.decode(@This(), reader, allocator);
+    }
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        return protobuf.deinit(allocator, self);
+    }
+
+    pub fn dupe(self: @This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
+        return protobuf.dupe(@This(), self, allocator);
+    }
+
+    pub fn jsonDecode(
+        input: []const u8,
+        options: std.json.ParseOptions,
+        allocator: std.mem.Allocator,
+    ) !std.json.Parsed(@This()) {
+        return protobuf.json.decode(@This(), input, options, allocator);
+    }
+
+    pub fn jsonEncode(
+        self: @This(),
+        options: std.json.Stringify.Options,
+        allocator: std.mem.Allocator,
+    ) ![]const u8 {
+        return protobuf.json.encode(self, options, allocator);
+    }
+
+    // This method is used by std.json
+    // internally for deserialization. DO NOT RENAME!
+    pub fn jsonParse(
+        allocator: std.mem.Allocator,
+        source: anytype,
+        options: std.json.ParseOptions,
+    ) !@This() {
+        return protobuf.json.parse(@This(), allocator, source, options);
+    }
+
+    // This method is used by std.json
+    // internally for serialization. DO NOT RENAME!
+    pub fn jsonStringify(self: *const @This(), jws: anytype) !void {
+        return protobuf.json.stringify(@This(), self, jws);
+    }
+};
+
+pub const SleepMsRequest = struct {
+    sleep_ms: u32 = 0,
+
+    pub const _desc_table = .{
+        .sleep_ms = fd(1, .{ .scalar = .uint32 }),
     };
 
     pub fn encode(
@@ -1965,6 +2028,8 @@ pub const AppMessage = struct {
         pwm_setup_response,
         pwm_set_level_request,
         pwm_set_level_response,
+        sleep_ms_request,
+        sleep_ms_response,
     };
     pub const kind_union = union(_kind_case) {
         emtpy: Empty,
@@ -2007,6 +2072,8 @@ pub const AppMessage = struct {
         pwm_setup_response: Empty,
         pwm_set_level_request: PWMSetLevelRequest,
         pwm_set_level_response: Empty,
+        sleep_ms_request: SleepMsRequest,
+        sleep_ms_response: Empty,
         pub const _desc_table = .{
             .emtpy = fd(2, .submessage),
             .error_response = fd(10, .submessage),
@@ -2048,6 +2115,8 @@ pub const AppMessage = struct {
             .pwm_setup_response = fd(62, .submessage),
             .pwm_set_level_request = fd(63, .submessage),
             .pwm_set_level_response = fd(64, .submessage),
+            .sleep_ms_request = fd(65, .submessage),
+            .sleep_ms_response = fd(66, .submessage),
         };
     };
 

@@ -167,7 +167,11 @@ message FirmwareInfoRequest {
 message FirmwareInfoResponse {
   string hash = 1;
   string version = 2;
-  string updated_at = 3;
+  string serial_number = 3;
+}
+
+message SleepMsRequest {
+  uint32 sleep_ms = 1;
 }
 
 message AppMessage {
@@ -231,5 +235,10 @@ message AppMessage {
 
     PWMSetLevelRequest pwm_set_level_request = 63;
     Empty pwm_set_level_response = 64;
+
+    SleepMsRequest sleep_ms_request = 65;
+    Empty sleep_ms_response = 66
+    
+    ;
   }
 }

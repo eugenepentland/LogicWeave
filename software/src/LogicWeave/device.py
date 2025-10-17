@@ -72,10 +72,14 @@ class GPIO(_BasePeripheral):
         self.pull = state
 
     def write(self, state: bool):
+        if self.mode != 1:
+            self.set_mode(1)
         self._build_and_execute(all_pb2.GPIOWriteRequest, "gpio_write_response", 
                                 gpio_pin=self.pin, state=state)
 
     def read(self) -> bool:
+        if self.mode != 0:
+            self.set_mode(0)
         response = self._build_and_execute(all_pb2.GPIOReadRequest, "gpio_read_response", 
                                           gpio_pin=self.pin)
         return response.state

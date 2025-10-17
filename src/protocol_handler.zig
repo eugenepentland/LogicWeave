@@ -83,9 +83,13 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
     if (msg.kind) |kind_enum| {
         switch (kind_enum) {
             .firmware_info_request => |_| {
+                const id_array = try getUniqueBoardId();
+                var id_buff: [1]u8 = undefined;
+                picoGetUniqueBoardIdString(&id_buff, id_array);
                 return encode_message(writer, allocator, .{ .firmware_info_response = .{
                     .hash = firmware_config.GIT_HASH,
                     .version = firmware_config.version,
+                    .serial_number = id_buff[0 .. id_buff.len - 1],
                 } });
             },
             .usb_bootloader_request => {
@@ -291,7 +295,102 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 }
                 return encode_message(writer, allocator, .{ .gpio_pin_pull_response = .{ .status = 200 } });
             },
+            .sleep_ms_request => |request| {
+                rp2xxx.time.sleep_ms(@intCast(request.sleep_ms));
+                return encode_message(writer, allocator, .{ .sleep_ms_response = .{ .status = 200 } });
+            },
             else => return,
         }
     }
+}
+
+const rom = rp2xxx.rom;
+const arch = rp2xxx.compatibility.arch;
+
+const PICO_UNIQUE_BOARD_ID_SIZE_BYTES: u32 = 8;
+const OTP_ROW_UNIQUE_ID: u32 = 0x1c;
+const OTP_FLAG_READ: u32 = 0; // 0 for read, 1 for write
+const SYS_INFO_CHIP_INFO: u32 = 0x0001;
+const OUTPUT_BUFFER_WORD_SIZE: u32 = 9; // 9 u32 words as in the SDK
+
+pub const UniqueIdError = error{
+    RomFunctionNotFound,
+    UnexpectedWordCount,
+};
+
+pub fn getUniqueBoardId() ![PICO_UNIQUE_BOARD_ID_SIZE_BYTES]u8 {
+    var out: [OUTPUT_BUFFER_WORD_SIZE]u32 = undefined;
+    var retrieved_id: [PICO_UNIQUE_BOARD_ID_SIZE_BYTES]u8 = undefined;
+
+    // 1) Lookup + null-check
+    const any_fn_opt = rom.lookup_and_cache_function(.get_sys_info);
+    if (any_fn_opt == null) return UniqueIdError.RomFunctionNotFound;
+
+    const func: *const rom.signatures.get_sys_info =
+        @ptrCast(@alignCast(any_fn_opt.?));
+
+    // 2) Call the ROM function
+    const rc: i32 = func(&out, OUTPUT_BUFFER_WORD_SIZE, SYS_INFO_CHIP_INFO);
+
+    // 3) Surface real ROM errors (negative)
+    if (rc < 0) {
+        // Turn ROM error codes into your rom.Error set (NotPermitted, InvalidArgument, etc.)
+        return error.RomError;
+    }
+
+    // 4) Expect exactly 4 words for SYS_INFO_CHIP_INFO, same as SDK (assert(rc == 4))
+    if (@as(u32, @intCast(rc)) != 4) return UniqueIdError.UnexpectedWordCount;
+
+    // 5) Byte extraction identical to the SDK:
+    // retrieved_id[i] = out.bytes[PICO_UNIQUE_BOARD_ID_SIZE_BYTES - 1 + 2*4 - i];
+    const out_bytes: []const u8 = std.mem.asBytes(&out);
+    //const base: usize = (2 * 4); // 8
+    for (0..PICO_UNIQUE_BOARD_ID_SIZE_BYTES) |i| {
+        retrieved_id[i] = out_bytes[PICO_UNIQUE_BOARD_ID_SIZE_BYTES - 1 + 2 * 4 - i];
+    }
+
+    return retrieved_id;
+}
+// Note: The board_id array size should be based on the constant PICO_UNIQUE_BOARD_ID_SIZE_BYTES
+pub fn picoGetUniqueBoardIdString(id_out: []u8, board_id: [PICO_UNIQUE_BOARD_ID_SIZE_BYTES]u8) void {
+    // C code's 'assert(len > 0);' is implicitly covered by id_out.len > 0 later,
+    // but a check for a completely empty buffer is good practice.
+    if (id_out.len == 0) return;
+
+    // Calculate the maximum number of hex characters that *could* be written.
+    const max_hex_chars = PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2;
+
+    // Determine the actual loop limit: min(output buffer size - 1, max_hex_chars)
+    // - id_out.len - 1: Reserves space for the null terminator.
+    // - max_hex_chars: Prevents reading beyond the board_id.
+    const loop_limit: usize = @min(id_out.len - 1, max_hex_chars);
+
+    var i: usize = 0;
+    while (i < loop_limit) : (i += 1) {
+        // C code: (i&1) is 0 for even i (high nibble) and 1 for odd i (low nibble).
+        // C code: (4 - 4 * (i&1))
+        //   If i is even (i&1=0): 4 - 0 = 4 (shift right 4 for the high nibble)
+        //   If i is odd (i&1=1): 4 - 4 = 0 (shift right 0 for the low nibble)
+
+        const is_odd = i & 1;
+        // Shift amount is 4 for the high nibble (i is even) or 0 for the low nibble (i is odd)
+        const shift_amount = 4 - (4 * is_odd);
+
+        // board_id[i/2] accesses the correct byte
+        // The @as(u3, @intCast(shift_amount)) is correct for casting to a small enough int type for a shift
+        const nibble = (board_id[i / 2] >> @as(u3, @intCast(shift_amount))) & 0x0F;
+
+        // Convert the nibble (0-15) to hex character ('0'-'F').
+        if (nibble < 10) {
+            id_out[i] = @as(u8, @intCast(nibble + '0')); // More idiomatic cast
+        } else {
+            // 'A' - 10 is '7' (ASCII 55). nibble + 'A' - 10 is 'A' to 'F'
+            id_out[i] = @as(u8, @intCast(nibble - 10 + 'A')); // More idiomatic cast
+        }
+    }
+
+    // Always null-terminate the string at the end of the written characters.
+    // i will be exactly loop_limit after the loop finishes.
+    // This is safe because loop_limit <= id_out.len - 1, so i <= id_out.len - 1.
+    id_out[i] = 0;
 }
