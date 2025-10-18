@@ -241,10 +241,10 @@ class LogicWeave:
         
         request_bytes = app_message.SerializeToString()
         length = len(request_bytes)
-        if length > 65535:
-            raise ValueError(f"Message too large for 2-byte prefix: {length} bytes.")
+        if length > 256:
+            raise ValueError(f"Message too large for 1-byte prefix: {length} bytes.")
 
-        length_prefix = struct.pack(">H", length)
+        length_prefix = struct.pack(">B", length)
         
         if not self.ser or not self.ser.is_open:
             raise DeviceConnectionError("Serial port is not open.")

@@ -152,7 +152,7 @@ fn handleUsbRx() void {
     if (rx_data.len > 0) {
         // Copy the data to the shared memory
         shared_data_spinlock.lock();
-        std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data);
+        std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data[1..]);
         shared_data_spinlock.unlock();
 
         // Signal to core1 data is ready and what its length it
