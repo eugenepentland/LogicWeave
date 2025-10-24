@@ -2,10 +2,19 @@ syntax = "proto3";
 
 package all;
 
-enum Mode {
-  input = 0;
-  output = 1;
-  disabled = 2;
+enum GpioFunction {
+  xip = 0;
+  hstx = 1;
+  spi = 2;
+  uart = 3;
+  i2c = 4;
+  pwm = 5;
+  sio_in = 6;
+  sio_out = 7;
+  pio = 8;
+  gpck = 9;
+  usb = 10;
+  none = 11;
 }
 
 enum BankVoltage {
@@ -18,6 +27,14 @@ enum PinPullState {
   None = 0;
   PullUp = 1;
   PullDown = 2;
+}
+
+message GPIOReadFunctionRequest {
+  uint32 gpio_pin = 1;
+}
+
+message GPIOReadFunctionResponse {
+  GpioFunction function = 1;
 }
 
 message UsbBootloaderRequest {
@@ -128,9 +145,9 @@ message I2CReadResponse {
   bytes data = 1;
 }
 
-message GPIOModeRequest {
+message GPIOFunctionRequest {
   uint32 gpio_pin = 1;
-  Mode mode = 2;
+  GpioFunction function = 2;
 }
 
 message ErrorResponse {
@@ -179,8 +196,8 @@ message AppMessage {
     Empty emtpy = 2;
     ErrorResponse error_response = 10;
 
-    GPIOModeRequest gpio_mode_request = 1;
-    Empty gpio_mode_response = 42;
+    GPIOFunctionRequest gpio_function_request = 1;
+    Empty gpio_function_response = 42;
 
     GPIOWriteRequest gpio_write_request = 3;
     Empty gpio_write_response = 5;
@@ -237,8 +254,9 @@ message AppMessage {
     Empty pwm_set_level_response = 64;
 
     SleepMsRequest sleep_ms_request = 65;
-    Empty sleep_ms_response = 66
+    Empty sleep_ms_response = 66;
     
-    ;
+    GPIOReadFunctionRequest gpio_read_function_request = 67;
+    GPIOReadFunctionResponse gpio_read_function_response = 68;
   }
 }

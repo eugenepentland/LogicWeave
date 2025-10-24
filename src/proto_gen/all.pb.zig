@@ -5,10 +5,19 @@ const std = @import("std");
 const protobuf = @import("protobuf");
 const fd = protobuf.fd;
 
-pub const Mode = enum(i32) {
-    input = 0,
-    output = 1,
-    disabled = 2,
+pub const GpioFunction = enum(i32) {
+    xip = 0,
+    hstx = 1,
+    spi = 2,
+    uart = 3,
+    i2c = 4,
+    pwm = 5,
+    sio_in = 6,
+    sio_out = 7,
+    pio = 8,
+    gpck = 9,
+    usb = 10,
+    none = 11,
     _,
 };
 
@@ -24,6 +33,132 @@ pub const PinPullState = enum(i32) {
     PullUp = 1,
     PullDown = 2,
     _,
+};
+
+pub const GPIOReadFunctionRequest = struct {
+    gpio_pin: u32 = 0,
+
+    pub const _desc_table = .{
+        .gpio_pin = fd(1, .{ .scalar = .uint32 }),
+    };
+
+    pub fn encode(
+        self: @This(),
+        writer: *std.Io.Writer,
+        allocator: std.mem.Allocator,
+    ) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+        return protobuf.encode(writer, allocator, self);
+    }
+
+    pub fn decode(
+        reader: *std.Io.Reader,
+        allocator: std.mem.Allocator,
+    ) (protobuf.DecodingError || std.Io.Reader.Error || std.mem.Allocator.Error)!@This() {
+        return protobuf.decode(@This(), reader, allocator);
+    }
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        return protobuf.deinit(allocator, self);
+    }
+
+    pub fn dupe(self: @This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
+        return protobuf.dupe(@This(), self, allocator);
+    }
+
+    pub fn jsonDecode(
+        input: []const u8,
+        options: std.json.ParseOptions,
+        allocator: std.mem.Allocator,
+    ) !std.json.Parsed(@This()) {
+        return protobuf.json.decode(@This(), input, options, allocator);
+    }
+
+    pub fn jsonEncode(
+        self: @This(),
+        options: std.json.Stringify.Options,
+        allocator: std.mem.Allocator,
+    ) ![]const u8 {
+        return protobuf.json.encode(self, options, allocator);
+    }
+
+    // This method is used by std.json
+    // internally for deserialization. DO NOT RENAME!
+    pub fn jsonParse(
+        allocator: std.mem.Allocator,
+        source: anytype,
+        options: std.json.ParseOptions,
+    ) !@This() {
+        return protobuf.json.parse(@This(), allocator, source, options);
+    }
+
+    // This method is used by std.json
+    // internally for serialization. DO NOT RENAME!
+    pub fn jsonStringify(self: *const @This(), jws: anytype) !void {
+        return protobuf.json.stringify(@This(), self, jws);
+    }
+};
+
+pub const GPIOReadFunctionResponse = struct {
+    function: GpioFunction = @enumFromInt(0),
+
+    pub const _desc_table = .{
+        .function = fd(1, .@"enum"),
+    };
+
+    pub fn encode(
+        self: @This(),
+        writer: *std.Io.Writer,
+        allocator: std.mem.Allocator,
+    ) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+        return protobuf.encode(writer, allocator, self);
+    }
+
+    pub fn decode(
+        reader: *std.Io.Reader,
+        allocator: std.mem.Allocator,
+    ) (protobuf.DecodingError || std.Io.Reader.Error || std.mem.Allocator.Error)!@This() {
+        return protobuf.decode(@This(), reader, allocator);
+    }
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        return protobuf.deinit(allocator, self);
+    }
+
+    pub fn dupe(self: @This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
+        return protobuf.dupe(@This(), self, allocator);
+    }
+
+    pub fn jsonDecode(
+        input: []const u8,
+        options: std.json.ParseOptions,
+        allocator: std.mem.Allocator,
+    ) !std.json.Parsed(@This()) {
+        return protobuf.json.decode(@This(), input, options, allocator);
+    }
+
+    pub fn jsonEncode(
+        self: @This(),
+        options: std.json.Stringify.Options,
+        allocator: std.mem.Allocator,
+    ) ![]const u8 {
+        return protobuf.json.encode(self, options, allocator);
+    }
+
+    // This method is used by std.json
+    // internally for deserialization. DO NOT RENAME!
+    pub fn jsonParse(
+        allocator: std.mem.Allocator,
+        source: anytype,
+        options: std.json.ParseOptions,
+    ) !@This() {
+        return protobuf.json.parse(@This(), allocator, source, options);
+    }
+
+    // This method is used by std.json
+    // internally for serialization. DO NOT RENAME!
+    pub fn jsonStringify(self: *const @This(), jws: anytype) !void {
+        return protobuf.json.stringify(@This(), self, jws);
+    }
 };
 
 pub const UsbBootloaderRequest = struct {
@@ -1397,13 +1532,13 @@ pub const I2CReadResponse = struct {
     }
 };
 
-pub const GPIOModeRequest = struct {
+pub const GPIOFunctionRequest = struct {
     gpio_pin: u32 = 0,
-    mode: Mode = @enumFromInt(0),
+    function: GpioFunction = @enumFromInt(0),
 
     pub const _desc_table = .{
         .gpio_pin = fd(1, .{ .scalar = .uint32 }),
-        .mode = fd(2, .@"enum"),
+        .function = fd(2, .@"enum"),
     };
 
     pub fn encode(
@@ -1990,8 +2125,8 @@ pub const AppMessage = struct {
     pub const _kind_case = enum {
         emtpy,
         error_response,
-        gpio_mode_request,
-        gpio_mode_response,
+        gpio_function_request,
+        gpio_function_response,
         gpio_write_request,
         gpio_write_response,
         usb_bootloader_request,
@@ -2030,12 +2165,14 @@ pub const AppMessage = struct {
         pwm_set_level_response,
         sleep_ms_request,
         sleep_ms_response,
+        gpio_read_function_request,
+        gpio_read_function_response,
     };
     pub const kind_union = union(_kind_case) {
         emtpy: Empty,
         error_response: ErrorResponse,
-        gpio_mode_request: GPIOModeRequest,
-        gpio_mode_response: Empty,
+        gpio_function_request: GPIOFunctionRequest,
+        gpio_function_response: Empty,
         gpio_write_request: GPIOWriteRequest,
         gpio_write_response: Empty,
         usb_bootloader_request: UsbBootloaderRequest,
@@ -2074,11 +2211,13 @@ pub const AppMessage = struct {
         pwm_set_level_response: Empty,
         sleep_ms_request: SleepMsRequest,
         sleep_ms_response: Empty,
+        gpio_read_function_request: GPIOReadFunctionRequest,
+        gpio_read_function_response: GPIOReadFunctionResponse,
         pub const _desc_table = .{
             .emtpy = fd(2, .submessage),
             .error_response = fd(10, .submessage),
-            .gpio_mode_request = fd(1, .submessage),
-            .gpio_mode_response = fd(42, .submessage),
+            .gpio_function_request = fd(1, .submessage),
+            .gpio_function_response = fd(42, .submessage),
             .gpio_write_request = fd(3, .submessage),
             .gpio_write_response = fd(5, .submessage),
             .usb_bootloader_request = fd(4, .submessage),
@@ -2117,6 +2256,8 @@ pub const AppMessage = struct {
             .pwm_set_level_response = fd(64, .submessage),
             .sleep_ms_request = fd(65, .submessage),
             .sleep_ms_response = fd(66, .submessage),
+            .gpio_read_function_request = fd(67, .submessage),
+            .gpio_read_function_response = fd(68, .submessage),
         };
     };
 

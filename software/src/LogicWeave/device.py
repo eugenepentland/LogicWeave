@@ -58,13 +58,11 @@ class GPIO(_BasePeripheral):
     def __init__(self, controller: 'LogicWeave', pin: int):
         super().__init__(controller)
         self.pin = pin
-        self.mode = None
         self.pull = None
 
-    def set_mode(self, mode: all_pb2.Mode):
-        self._build_and_execute(all_pb2.GPIOModeRequest, "gpio_mode_response", 
-                                gpio_pin=self.pin, mode=mode)
-        self.mode = mode
+    def set_function(self, mode: all_pb2.GpioFunction):
+        self._build_and_execute(all_pb2.GPIOFunctionRequest, "gpio_function_response", 
+                                gpio_pin=self.pin, function=mode)
 
     def set_pull(self, state: all_pb2.PinPullState):
         self._build_and_execute(all_pb2.GpioPinPullRequest, "gpio_pin_pull_response", 
@@ -72,14 +70,14 @@ class GPIO(_BasePeripheral):
         self.pull = state
 
     def write(self, state: bool):
-        if self.mode != 1:
-            self.set_mode(1)
+        if self._controller.read_pin_function(self.pin) != all_pb2.GpioFunction.sio_out:
+            self.set_function(all_pb2.GpioFunction.sio_out)
         self._build_and_execute(all_pb2.GPIOWriteRequest, "gpio_write_response", 
                                 gpio_pin=self.pin, state=state)
 
     def read(self) -> bool:
-        if self.mode != 0:
-            self.set_mode(0)
+        if self._controller.read_pin_function(self.pin) != all_pb2.GpioFunction.sio_in:
+            self.set_function(all_pb2.GpioFunction.sio_in)
         response = self._build_and_execute(all_pb2.GPIOReadRequest, "gpio_read_response", 
                                           gpio_pin=self.pin)
         return response.state
@@ -322,3 +320,7 @@ class LogicWeave:
     def write_bootloader_request(self):
         request = all_pb2.UsbBootloaderRequest(val=1)
         self._send_and_parse(request, "usb_bootloader_response")
+
+    def read_pin_function(self, gpio_pin):
+        request = all_pb2.GPIOReadFunctionRequest(gpio_pin=gpio_pin)
+        return self._send_and_parse(request, "gpio_read_function_response")

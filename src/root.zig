@@ -64,13 +64,13 @@ fn handleProcessRx(allocator: std.mem.Allocator) void {
         };
 
         // Try the custom usb handler if no data is in the usb_writer
-        if (usb_writer.buffered().len == 0) {
-            if (custom_usb_handler) |handler| {
-                var reader2 = std.Io.Reader.fixed(incoming_data);
-                handler(allocator, &reader2, &usb_writer);
-            }
-        }
-
+        //if (usb_writer.buffered().len == 578) {
+        //    if (custom_usb_handler) |handler| {
+        //        var reader2 = std.Io.Reader.fixed(incoming_data);
+        //        handler(allocator, &reader2, &usb_writer);
+        //    }
+        // }
+        shared_data_spinlock.unlock();
         // Copy it over to the shared tx buffer
         usbTxWrite(usb_writer.buffered());
         usb_writer.end = 0;
@@ -152,11 +152,11 @@ fn handleUsbRx() void {
     if (rx_data.len > 0) {
         // Copy the data to the shared memory
         shared_data_spinlock.lock();
-        std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data[1..]);
+        std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data[1..]); //Ignore the first byte, its a length prefix
         shared_data_spinlock.unlock();
 
         // Signal to core1 data is ready and what its length it
-        rp2xxx.multicore.fifo.write_blocking(@intCast(rx_data.len));
+        rp2xxx.multicore.fifo.write_blocking(@intCast(rx_data.len - 1));
     }
 }
 
@@ -164,8 +164,8 @@ fn handleUsbTx() void {
     // Writes a response to the fifo if it gets any
     if (rp2xxx.multicore.fifo.read()) |len| {
         shared_data_spinlock.lock();
+        defer shared_data_spinlock.unlock();
         usb_write(shared_usb_tx_buff[0..len]);
-        shared_data_spinlock.unlock();
     }
 }
 

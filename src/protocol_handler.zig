@@ -6,6 +6,9 @@ const protobuf = @import("protobuf");
 const firmware_config = @import("firmware_config");
 // Import our new modules
 const usb_cfg = @import("usb_config.zig");
+const peripherals = microzig.chip.peripherals;
+const SIO = peripherals.SIO;
+const chip = rp2xxx.compatibility.chip;
 
 const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
@@ -75,6 +78,37 @@ pub fn gpio_to_adc_input(pin_num: u8) !rp2xxx.adc.Input {
     }
 }
 
+pub inline fn read_direction(gpio: rp2xxx.gpio.Pin) rp2xxx.gpio.Direction {
+    const mask = gpio.mask();
+
+    switch (chip) {
+        .RP2040 => {
+            // Read the main GPIO_OE register.
+            const current_oe = SIO.GPIO_OE.raw;
+
+            if ((current_oe & mask) != 0) {
+                return .out;
+            } else {
+                return .in;
+            }
+        },
+        .RP2350 => {
+            const current_oe = if (gpio.is_upper())
+                // Use the high register for upper pins (GPIO24-GPIO31).
+                SIO.GPIO_HI_OE.raw
+            else
+                // Use the low register for lower pins (GPIO0-GPIO23).
+                SIO.GPIO_OE.raw;
+
+            if ((current_oe & mask) != 0) {
+                return .out;
+            } else {
+                return .in;
+            }
+        },
+    }
+}
+
 pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader, writer: *std.Io.Writer) !void {
     var msg = try protobuf.decode(messages.AppMessage, reader, allocator);
     defer msg.deinit(allocator);
@@ -84,7 +118,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
         switch (kind_enum) {
             .firmware_info_request => |_| {
                 const id_array = try getUniqueBoardId();
-                var id_buff: [1]u8 = undefined;
+                var id_buff: [17]u8 = undefined;
                 picoGetUniqueBoardIdString(&id_buff, id_array);
                 return encode_message(writer, allocator, .{ .firmware_info_response = .{
                     .hash = firmware_config.GIT_HASH,
@@ -93,8 +127,28 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 } });
             },
             .usb_bootloader_request => {
-                rp2xxx.rom.reset_to_usb_boot();
-                return;
+                return try writer.writeAll(&[_]u8{255, 255});
+            },
+            .gpio_read_function_request => |request| {
+                const pin: rp2xxx.gpio.Pin = @enumFromInt(request.gpio_pin);
+                const regs = pin.get_regs();
+                const func_selc = regs.ctrl.read().FUNCSEL;
+                const function: messages.GpioFunction = switch (func_selc) {
+                    .hstx => .hstx,
+                    .spi => .spi,
+                    .uart, .uart_alt => .uart,
+                    .i2c => .i2c,
+                    .pwm => .pwm,
+                    .pio0, .pio1, .pio2 => .pio,
+                    .gpck => .gpck,
+                    .usb => .usb,
+                    .sio => switch (read_direction(pin)) {
+                        .in => .sio_in,
+                        .out => .sio_out,
+                    },
+                    else => .none,
+                };
+                return encode_message(writer, allocator, .{ .gpio_read_function_response = .{ .function = function } });
             },
             .gpio_read_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
@@ -135,23 +189,23 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 pwm_ch.set_level(@intCast(request.level));
                 return encode_message(writer, allocator, .{ .pwm_set_level_response = .{ .status = 200 } });
             },
-            .gpio_mode_request => |request| {
+            .gpio_function_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
-                switch (request.mode) {
-                    .input => {
+                switch (request.function) {
+                    .sio_in => {
                         pin.set_function(.sio);
                         pin.set_direction(.in);
                     },
-                    .output => {
+                    .sio_out => {
                         pin.set_function(.sio);
                         pin.set_direction(.out);
                     },
-                    .disabled => {
+                    .none => {
                         pin.set_function(.disabled);
                     },
                     else => {}, // Handle other modes if necessary, or make this an error
                 }
-                return encode_message(writer, allocator, .{ .gpio_mode_response = .{ .status = 200 } });
+                return encode_message(writer, allocator, .{ .gpio_function_response = .{ .status = 200 } });
             },
             .uart_setup_request => |request| {
                 const tx_pin = getGPIO(request.tx_pin);
