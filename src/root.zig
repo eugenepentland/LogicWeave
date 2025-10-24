@@ -164,6 +164,8 @@ fn handleUsbTx() void {
     // Writes a response to the fifo if it gets any
     if (rp2xxx.multicore.fifo.read()) |len| {
         shared_data_spinlock.lock();
+        if (len == 1) rp2xxx.rom.reset_to_usb_boot(); // special case to reboot hardware
+        
         defer shared_data_spinlock.unlock();
         usb_write(shared_usb_tx_buff[0..len]);
     }

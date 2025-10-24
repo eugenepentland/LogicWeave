@@ -127,7 +127,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 } });
             },
             .usb_bootloader_request => {
-                return try writer.writeAll(&[_]u8{255, 255});
+                return try writer.writeByte(255);
             },
             .gpio_read_function_request => |request| {
                 const pin: rp2xxx.gpio.Pin = @enumFromInt(request.gpio_pin);

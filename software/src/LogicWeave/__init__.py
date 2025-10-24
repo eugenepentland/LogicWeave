@@ -1,2 +1,2 @@
-from .device import LogicWeave
-from .definitions import GPIOMode, BankVoltage, PinPullState
+from .device import LogicWeave, GPIO, UART, I2C, SPI
+from .logicweave_core import LogicWeaveCore
