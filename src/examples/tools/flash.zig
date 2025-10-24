@@ -93,6 +93,8 @@ pub fn set_usb_boot(port_name: []const u8, allocator: std.mem.Allocator) !void {
     // Encode to bytes
     var buff: [32]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buff);
+
+    try writer.writeByte(5); //prepend the lgenth of the message
     try protobuf.encode(&writer, allocator, msg);
 
     var serial_writer = serial.writer(&.{});
