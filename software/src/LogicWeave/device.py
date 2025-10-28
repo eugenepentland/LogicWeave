@@ -206,9 +206,6 @@ class LogicWeave:
         except serial.SerialException as e:
             raise DeviceConnectionError(f"Failed to connect to {port}: {e}") from e
 
-        # --- THIS SET IS NO LONGER NEEDED ---
-        # self._EMPTY_RESPONSE_FIELDS = { ... }
-
     # --- Peripheral Factory Methods ---
     def uart(self, instance_num: int, tx_pin: int, rx_pin: int, baud_rate: int = 115200) -> 'UART':
         return UART(self, instance_num, tx_pin, rx_pin, baud_rate)

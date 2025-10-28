@@ -188,7 +188,7 @@ class LogicWeaveCore(LogicWeave):
         print(f"--- Calibrating Channel {channel} to {voltage:.3f}V (Tolerance: +/- {tolerance_v*1000:.0f}mV) ---")
 
         # Start with an initial guess for the DAC value
-        self.enable_channel(channel, True)
+        self.enable_channel(channel, False)
         current_dac_value = self._voltage_to_dac(voltage)
         self.dac.set_voltage(channel=dac_channel, value=current_dac_value)
         time.sleep(0.05)
@@ -358,11 +358,13 @@ class LogicWeaveCore(LogicWeave):
         """Activates the voltage divider circuit for voltage measurement."""
         self.disable_all_circuits()
         self.voltmeter_switch.write(True)
+        time.sleep(0.05)
 
     def enable_resistance_meter(self):
         """Activates the resistor bank circuit for resistance measurement."""
         self.disable_all_circuits()
         self.resistance_meter_switch.write(True)
+        time.sleep(0.05)
 
     def read_voltmeter(self, r1_series: float = 56000.0, r2_gnd: float = 10000.0, cal_factor: float = 1.01) -> float:
         """Reads the ADC voltage from the voltmeter circuit and scales it back to V_in."""
