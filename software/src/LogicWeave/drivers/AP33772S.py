@@ -1,6 +1,7 @@
 
 import struct
 from enum import Enum
+import time
 
 class AP3377Error(Exception):
     """Custom exception for AP3377 operations."""
@@ -123,10 +124,11 @@ class AP33772S:
 
     class SRC_PDO:
         """Represents a Source PDO (2 bytes, Little Endian)."""
-        def __init__(self, pdo_bytes: bytes):
+        def __init__(self, index: int, pdo_bytes: bytes):
             # Data is Little Endian (LE)
             raw_pdo = struct.unpack('<H', pdo_bytes)[0]
 
+            self.index = index
             self.voltage_max = (raw_pdo & 0x00FF)       # Bits 7:0 (u8)
             self.peak_current_or_voltage_min = (raw_pdo >> 8) & 0x03 # Bits 9:8 (u2)
             self.current_max_code = (raw_pdo >> 10) & 0x0F    # Bits 13:10 (u4)
@@ -170,7 +172,7 @@ class AP33772S:
         i2c_instance: An object matching the LogicWeave i2c interface.
         """
         self.i2c_instance = i2c_instance
-        #self.configure_protections(self.DEFAULT_CONFIG)
+        self.configure_protections(self.DEFAULT_CONFIG)
 
     def __del__(self):
         """Called upon object deletion (approximation of deinit)."""
@@ -253,10 +255,47 @@ class AP33772S:
         raw_ireq = struct.unpack('<H', data)[0]
         return raw_ireq * 10
 
-    def request_pdo(self, pdo_request: PDORequest) -> None:
-        """Sends a PDO request message (PD_REQMSG 0x31)."""
-        request_bytes = pdo_request.to_bytes()
-        self._write_register(self.Register.PD_REQMSG, request_bytes)
+    def request_pdo(self, pdo_request: PDORequest, timeout_s: float = 1.0) -> bool:
+            """
+            Sends a PDO request message (PD_REQMSG 0x31) and polls the result.
+
+            Args:
+                pdo_request: The PDORequest object to send.
+                timeout_s: Maximum time in seconds to wait for a successful response (PD_MSGRLT = 1).
+
+            Returns:
+                True if the negotiation was successful (PD_MSGRLT = 1), False otherwise.
+            """
+            request_bytes = pdo_request.to_bytes()
+            
+            # 1. Send the request
+            self._write_register(self.Register.PD_REQMSG, request_bytes)
+
+            # 2. Poll the PD_MSGRLT register
+            start_time = time.monotonic()
+            polling_interval = 0.01  # Poll frequently (10ms)
+
+            while time.monotonic() - start_time < timeout_s:
+                result = self.get_pd_message_result()
+                
+                # PD_MSGRLT = 1 means negotiation successful (PS_RDY received)
+                if result == 1:
+                    # Clear the result bit by writing the command again to reset for next negotiation (common I2C register pattern)
+                    # Or based on the flowchart, this read/check is where the MCU determines success
+                    return True
+                
+                # If a fault is signaled (e.g., 0x02 for Hard Reset or another error if defined, though datasheet only mentions 1)
+                # you may want to handle it here. For now, we only check for success (1).
+                if result != 0:
+                    # If result is not 0 or 1, it might be an unhandled error code (e.g., 2 for Hard Reset result)
+                    print(f"PDO request failed with result code: {result}")
+                    return False
+
+                time.sleep(polling_interval)
+            
+            # 3. Timeout reached
+            print(f"PDO request timed out after {timeout_s} seconds. Result was 0.")
+            return False
 
     def get_pd_message_result(self) -> int:
         """Reads the result of the last PD request/command (PD_MSGRLT 0x33)."""
@@ -298,4 +337,4 @@ class AP33772S:
         pdo_bytes = self._read_register(register_addr, 2)
         
         # The is_epr check is passed for PDO calculations but not used in the read itself
-        return self.SRC_PDO(pdo_bytes)
+        return self.SRC_PDO(index, pdo_bytes)

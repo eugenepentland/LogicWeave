@@ -87,6 +87,17 @@ class LogicWeaveCore(LogicWeave):
 
         self._setup()
 
+    def _get_max_fixed_pdo(self) ->  AP33772S.SRC_PDO:
+        max_voltage = 0
+        pdo: AP33772S.SRC_PDO = None
+        for i in range(1,14):
+            source_pdo = self.pd.read_source_pdo(i, False)
+            if source_pdo.type == 1: continue # only check fixed pdo's
+            if source_pdo.voltage_max > max_voltage:
+                max_voltage = source_pdo.voltage_max
+                pdo = source_pdo
+
+        return pdo
 
     def _setup(self):
         """Initializes all hardware: PPS, Voltmeter, and Resistance Meter."""
@@ -99,8 +110,9 @@ class LogicWeaveCore(LogicWeave):
         
         # Setup the PD source and request 20V input
         self.pd = AP33772S(i2c_instance=self.i2c_instance)
-        pdo = AP33772S.PDORequest(5, 15, 1) # Example PDO request (20V, 5A)
-        self.pd.request_pdo(pdo)
+        pdo = self._get_max_fixed_pdo()
+        pdo_req = AP33772S.PDORequest(pdo.index, pdo.current_max_code, 0x00)
+        self.pd.request_pdo(pdo_req)
         print(f"PPS: PD voltage check: {self.pd.read_voltage_mv()}mV, Temp: {self.pd.read_temperature()}C")
 
         # Setup the DAC
