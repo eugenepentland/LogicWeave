@@ -28,7 +28,6 @@ const shared_data_spinlock = rp2xxx.multicore.Spinlock.init(0);
 const LogicWeave = @This();
 
 fn panic(_: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
-    //std.log.err("The RP2350 has crashed: {s}. {any}", .{ message, s });
     @breakpoint();
     rp2xxx.rom.reboot_to_bootsel_now() catch {};
     while (true) {}
@@ -43,7 +42,6 @@ fn core1() void {
     while (true) {
         // Wait for usb data length in the fifo
         handleProcessRx(allocator);
-        //handleInterrupts();
     }
 }
 
@@ -89,35 +87,7 @@ pub fn usbTxWrite(buff: []const u8) void {
 
 var stack: [8192]u32 = undefined;
 
-fn gpio_interrupt() callconv(.c) void {
-    const cs = microzig.interrupt.enter_critical_section();
-    defer cs.leave();
-
-    for (interrupts_list[0..intr_index]) |i| {
-        i.checkAndClear();
-    }
-}
-
-var interrupts_list: [8]*Interrupt.Interrupt = undefined;
-var intr_index: u8 = 0;
-
-pub fn addInterrupt(intr: *Interrupt.Interrupt) void {
-    interrupts_list[intr_index] = intr;
-    intr.setup();
-    intr_index += 1;
-}
-
-// Sets up the interrupts
-fn enableInterrupts() void {
-    microzig.interrupt.enable(.IO_IRQ_BANK0);
-    microzig.interrupt.enable_interrupts();
-    //_ = microzig.interrupt.set_handler(.IO_IRQ_BANK0, .{ .c = gpio_interrupt });
-}
-
 pub fn run() void {
-    // Enable Interrupts
-    //enableInterrupts();
-
     // Initialize the USB device
     const usb_dev = usb.Usb(.{});
     usb_dev.init_clk();
@@ -134,15 +104,6 @@ pub fn run() void {
 
         handleUsbRx();
         handleUsbTx();
-    }
-}
-
-fn handleInterrupts() void {
-    for (interrupts_list) |i| {
-        if (i.triggered) {
-            i.handler();
-            i.triggered = false;
-        }
     }
 }
 
