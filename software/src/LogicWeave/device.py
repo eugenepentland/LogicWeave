@@ -185,7 +185,9 @@ def _get_device_port():
     vid, pid = 0x1E8B, 0x0001
     ports = serial.tools.list_ports.comports()
     for port in ports:
-        if port.vid == vid and port.pid == pid:
+        print(port.__dict__)
+    for port in ports:
+        if port.vid == vid and port.pid == pid and port.interface == "LogicWeave Driver":
             return port.device
     return None
 

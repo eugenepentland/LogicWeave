@@ -1,4 +1,3 @@
-// src/main.zig
 const std = @import("std");
 const microzig = @import("microzig");
 const firmware_config = @import("firmware_config");
@@ -103,7 +102,7 @@ pub fn run() void {
         usb_dev.task(false) catch unreachable;
 
         handleUsbRx();
-        handleUsbTx();
+        handleUsbTx(); // <-- FIXED: Pass the initialized usb_dev
     }
 }
 
@@ -114,6 +113,8 @@ fn handleUsbRx() void {
         // Copy the data to the shared memory
         shared_data_spinlock.lock();
         std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data[1..]); //Ignore the first byte, its a length prefix
+        // Write the data to the webui
+        usb_write(.webui, rx_data[0..]);
         shared_data_spinlock.unlock();
 
         // Signal to core1 data is ready and what its length it
@@ -126,9 +127,9 @@ fn handleUsbTx() void {
     if (rp2xxx.multicore.fifo.read()) |len| {
         shared_data_spinlock.lock();
         if (len == 1) rp2xxx.rom.reset_to_usb_boot(); // special case to reboot hardware
-        
+
         defer shared_data_spinlock.unlock();
-        usb_write(shared_usb_tx_buff[0..len]);
+        usb_write(.driver, shared_usb_tx_buff[0..len]); // <-- FIXED: Pass it along
     }
 }
 
@@ -136,8 +137,9 @@ fn usb_read() []const u8 {
     var total_read: usize = 0;
     var read_buff: []u8 = usb_rx_buff[0..];
 
+    // Read in usb data through the main driver
     while (true) {
-        const len = usb_cfg.driver_cdc.read(read_buff);
+        const len = usb_cfg.cdc0_driver.read(read_buff);
         read_buff = read_buff[len..];
         total_read += len;
         if (len == 0) break;
@@ -145,17 +147,20 @@ fn usb_read() []const u8 {
     return usb_rx_buff[0..total_read];
 }
 
-fn usb_write(buff: []const u8) void {
-    const usb_dev = rp2xxx.usb.Usb(.{});
+const cdc_driver = enum {
+    driver,
+    webui,
+};
+
+fn usb_write(driver_enum: cdc_driver, buff: []const u8) void {
+    var driver = if (driver_enum == .driver) usb_cfg.cdc0_driver else usb_cfg.cdc1_driver;
     var write_buff = buff;
 
     const msg_lenth: u8 = @intCast(write_buff.len);
-    _ = usb_cfg.driver_cdc.write(&[_]u8{msg_lenth});
+    _ = driver.write(&[_]u8{msg_lenth});
 
     while (write_buff.len > 0) {
-        write_buff = usb_cfg.driver_cdc.write(write_buff);
-        usb_dev.task(false) catch unreachable;
+        write_buff = driver.write(write_buff);
     }
-    _ = usb_cfg.driver_cdc.write_flush();
-    usb_dev.task(false) catch unreachable;
+    _ = driver.write_flush();
 }
