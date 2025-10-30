@@ -102,7 +102,7 @@ pub fn run() void {
         usb_dev.task(false) catch unreachable;
 
         handleUsbRx();
-        handleUsbTx(); // <-- FIXED: Pass the initialized usb_dev
+        handleUsbTx();
     }
 }
 
@@ -113,8 +113,8 @@ fn handleUsbRx() void {
         // Copy the data to the shared memory
         shared_data_spinlock.lock();
         std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data[1..]); //Ignore the first byte, its a length prefix
-        // Write the data to the webui
-        usb_write(.webui, rx_data[0..]);
+        // Write the request to the webui
+        usb_write(.webui, rx_data[1..]);
         shared_data_spinlock.unlock();
 
         // Signal to core1 data is ready and what its length it
@@ -126,10 +126,11 @@ fn handleUsbTx() void {
     // Writes a response to the fifo if it gets any
     if (rp2xxx.multicore.fifo.read()) |len| {
         shared_data_spinlock.lock();
-        if (len == 1) rp2xxx.rom.reset_to_usb_boot(); // special case to reboot hardware
+        if (len == 1) rp2xxx.rom.reset_to_usb_boot();
 
         defer shared_data_spinlock.unlock();
-        usb_write(.driver, shared_usb_tx_buff[0..len]); // <-- FIXED: Pass it along
+        usb_write(.driver, shared_usb_tx_buff[0..len]);
+        usb_write(.webui, shared_usb_tx_buff[0..len]);
     }
 }
 

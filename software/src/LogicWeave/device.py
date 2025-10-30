@@ -55,14 +55,15 @@ class GPIO(_BasePeripheral):
     MAX_ADC_COUNT = 4095
     V_REF = 3.3
 
-    def __init__(self, controller: 'LogicWeave', pin: int):
+    def __init__(self, controller: 'LogicWeave', pin: int, name: Optional[str] = "gpio"):
         super().__init__(controller)
         self.pin = pin
         self.pull = None
+        self.name = name
 
     def set_function(self, mode: all_pb2.GpioFunction):
         self._build_and_execute(all_pb2.GPIOFunctionRequest, "gpio_function_response", 
-                                gpio_pin=self.pin, function=mode)
+                                gpio_pin=self.pin, function=mode, name=self.name)
 
     def set_pull(self, state: all_pb2.PinPullState):
         self._build_and_execute(all_pb2.GpioPinPullRequest, "gpio_pin_pull_response", 
@@ -86,7 +87,7 @@ class GPIO(_BasePeripheral):
         self._build_and_execute(all_pb2.PWMSetupRequest, "pwm_setup_response", 
                                 gpio_pin=self.pin, wrap=wrap, 
                                 clock_div_int=clock_div_int, 
-                                clock_div_frac=clock_div_frac)
+                                clock_div_frac=clock_div_frac, name=self.name)
 
     def set_pwm_level(self, level):
         self._build_and_execute(all_pb2.PWMSetLevelRequest, "pwm_set_level_response", 
@@ -102,17 +103,18 @@ class GPIO(_BasePeripheral):
 
 
 class I2C(_BasePeripheral):
-    def __init__(self, controller: 'LogicWeave', instance_num: int, sda_pin: int, scl_pin: int):
+    def __init__(self, controller: 'LogicWeave', instance_num: int, sda_pin: int, scl_pin: int, name: Optional[str] = "i2c"):
         super().__init__(controller)
         self._instance_num = instance_num
         self.sda_pin = sda_pin
         self.scl_pin = scl_pin
+        self.name = name
         self._setup()
 
     def _setup(self):
         self._build_and_execute(all_pb2.I2CSetupRequest, "i2c_setup_response", 
                                 instance_num=self._instance_num, sda_pin=self.sda_pin, 
-                                scl_pin=self.scl_pin)
+                                scl_pin=self.scl_pin, name=self.name)
 
     def write(self, device_address: int, data: bytes):
         self._build_and_execute(all_pb2.I2CWriteRequest, "i2c_write_response", 
@@ -138,7 +140,7 @@ class I2C(_BasePeripheral):
 
 
 class SPI(_BasePeripheral):
-    def __init__(self, controller: 'LogicWeave', instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int, baud_rate: int, default_cs_pin: Optional[int] = None):
+    def __init__(self, controller: 'LogicWeave', instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int, baud_rate: int, name: Optional[str] = "spi", default_cs_pin: Optional[int] = None):
         super().__init__(controller)
         self._instance_num = instance_num
         self.sclk_pin = sclk_pin
@@ -146,13 +148,14 @@ class SPI(_BasePeripheral):
         self.miso_pin = miso_pin
         self.baud_rate = baud_rate
         self._default_cs_pin = default_cs_pin
+        self.name = name
         self._setup()
 
     def _setup(self):
         self._build_and_execute(all_pb2.SPISetupRequest, "spi_setup_response", 
                                 instance_num=self._instance_num, sclk_pin=self.sclk_pin, 
                                 mosi_pin=self.mosi_pin, miso_pin=self.miso_pin, 
-                                baud_rate=self.baud_rate)
+                                baud_rate=self.baud_rate, name=self.name)
 
     def _get_cs_pin(self, cs_pin_override: Optional[int]) -> int:
         active_cs_pin = cs_pin_override if cs_pin_override is not None else self._default_cs_pin
@@ -209,17 +212,17 @@ class LogicWeave:
             raise DeviceConnectionError(f"Failed to connect to {port}: {e}") from e
 
     # --- Peripheral Factory Methods ---
-    def uart(self, instance_num: int, tx_pin: int, rx_pin: int, baud_rate: int = 115200) -> 'UART':
-        return UART(self, instance_num, tx_pin, rx_pin, baud_rate)
+    def uart(self, instance_num: int, tx_pin: int, rx_pin: int, baud_rate: int = 115200, name: str = "uart") -> 'UART':
+        return UART(self, instance_num, tx_pin, rx_pin, baud_rate, name)
 
-    def gpio(self, pin: int) -> GPIO:
-        return GPIO(self, pin)
+    def gpio(self, pin: int, name: str = "gpio") -> GPIO:
+        return GPIO(self, pin, name)
 
-    def i2c(self, instance_num: int, sda_pin: int, scl_pin: int) -> I2C:
-        return I2C(self, instance_num, sda_pin, scl_pin)
+    def i2c(self, instance_num: int, sda_pin: int, scl_pin: int, name: str = "i2c") -> I2C:
+        return I2C(self, instance_num, sda_pin, scl_pin, name)
 
-    def spi(self, instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int, baud_rate: int = 1000000, default_cs_pin: Optional[int] = None) -> SPI:
-        return SPI(self, instance_num, sclk_pin, mosi_pin, miso_pin, baud_rate, default_cs_pin)
+    def spi(self, instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int, baud_rate: int = 1000000, default_cs_pin: Optional[int] = None, name: str = "spi") -> SPI:
+        return SPI(self, instance_num, sclk_pin, mosi_pin, miso_pin, baud_rate, default_cs_pin, name)
 
     # --- Core Communication Logic ---
     def _execute_transaction(self, specific_message_payload):

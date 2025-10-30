@@ -418,12 +418,14 @@ pub const PWMSetupRequest = struct {
     wrap: u32 = 0,
     clock_div_int: u32 = 0,
     clock_div_frac: u32 = 0,
+    name: []const u8 = &.{},
 
     pub const _desc_table = .{
         .gpio_pin = fd(1, .{ .scalar = .uint32 }),
         .wrap = fd(2, .{ .scalar = .uint32 }),
         .clock_div_int = fd(3, .{ .scalar = .uint32 }),
         .clock_div_frac = fd(4, .{ .scalar = .uint32 }),
+        .name = fd(5, .{ .scalar = .string }),
     };
 
     pub fn encode(
@@ -807,6 +809,7 @@ pub const SPISetupRequest = struct {
     miso_pin: u32 = 0,
     instance_num: u32 = 0,
     baud_rate: u32 = 0,
+    name: []const u8 = &.{},
 
     pub const _desc_table = .{
         .sclk_pin = fd(2, .{ .scalar = .uint32 }),
@@ -814,6 +817,7 @@ pub const SPISetupRequest = struct {
         .miso_pin = fd(4, .{ .scalar = .uint32 }),
         .instance_num = fd(5, .{ .scalar = .uint32 }),
         .baud_rate = fd(6, .{ .scalar = .uint32 }),
+        .name = fd(7, .{ .scalar = .string }),
     };
 
     pub fn encode(
@@ -1140,11 +1144,13 @@ pub const I2CSetupRequest = struct {
     sda_pin: u32 = 0,
     scl_pin: u32 = 0,
     instance_num: u32 = 0,
+    name: []const u8 = &.{},
 
     pub const _desc_table = .{
         .sda_pin = fd(1, .{ .scalar = .uint32 }),
         .scl_pin = fd(2, .{ .scalar = .uint32 }),
         .instance_num = fd(3, .{ .scalar = .uint32 }),
+        .name = fd(4, .{ .scalar = .string }),
     };
 
     pub fn encode(
@@ -1535,10 +1541,12 @@ pub const I2CReadResponse = struct {
 pub const GPIOFunctionRequest = struct {
     gpio_pin: u32 = 0,
     function: GpioFunction = @enumFromInt(0),
+    name: []const u8 = &.{},
 
     pub const _desc_table = .{
         .gpio_pin = fd(1, .{ .scalar = .uint32 }),
         .function = fd(2, .@"enum"),
+        .name = fd(3, .{ .scalar = .string }),
     };
 
     pub fn encode(
@@ -1665,12 +1673,14 @@ pub const UartSetupRequest = struct {
     tx_pin: u32 = 0,
     rx_pin: u32 = 0,
     instance_num: u32 = 0,
+    name: []const u8 = &.{},
 
     pub const _desc_table = .{
         .baud_rate = fd(1, .{ .scalar = .uint32 }),
         .tx_pin = fd(2, .{ .scalar = .uint32 }),
         .rx_pin = fd(3, .{ .scalar = .uint32 }),
         .instance_num = fd(4, .{ .scalar = .uint32 }),
+        .name = fd(5, .{ .scalar = .string }),
     };
 
     pub fn encode(

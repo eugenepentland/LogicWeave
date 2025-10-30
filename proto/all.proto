@@ -58,6 +58,7 @@ message PWMSetupRequest {
   uint32 wrap = 2;
   uint32 clock_div_int = 3;
   uint32 clock_div_frac = 4;
+  string name = 5;
 }
 
 message PWMSetLevelRequest {
@@ -88,6 +89,7 @@ message SPISetupRequest {
   uint32 miso_pin = 4;
   uint32 instance_num = 5;
   uint32 baud_rate = 6;
+  string name = 7;
 }
 
 message SPIWriteRequest {
@@ -116,6 +118,7 @@ message I2CSetupRequest {
   uint32 sda_pin = 1;
   uint32 scl_pin = 2;
   uint32 instance_num = 3;
+  string name = 4;
 }
 
 message I2CWriteRequest {
@@ -148,6 +151,7 @@ message I2CReadResponse {
 message GPIOFunctionRequest {
   uint32 gpio_pin = 1;
   GpioFunction function = 2;
+  string name = 3;
 }
 
 message ErrorResponse {
@@ -159,6 +163,7 @@ message UartSetupRequest {
   uint32 tx_pin = 2;
   uint32 rx_pin = 3;
   uint32 instance_num = 4;
+  string name = 5;
 }
 
 message UartWriteRequest {

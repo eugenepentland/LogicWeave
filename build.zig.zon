@@ -24,8 +24,7 @@
     // internet connectivity.
     .dependencies = .{
         .microzig = .{
-            .url = "https://github.com/ZigEmbeddedGroup/microzig/releases/download/0.15.0/microzig.tar.gz",
-            .hash = "microzig-0.15.0-D20YSTUgCADpOaRtQ4SOk0HJ_E4342rgS9m3LQGhITbd",
+            .path="deps/microzig/"
         },
         .protobuf = .{
             .url = "https://github.com/Arwalk/zig-protobuf/archive/refs/tags/v3.0.0.tar.gz",
