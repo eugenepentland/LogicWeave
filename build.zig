@@ -9,7 +9,7 @@ pub fn build(b: *Build) void {
 
     // Add protobuf depedencies
     generate_protobuf_bindings(b, host_target);
-    const messages_mod = b.createModule(.{ .root_source_file = b.path("src/proto_gen/all.pb.zig") });
+    const messages_mod = b.createModule(.{ .root_source_file = b.path("src/proto_gen/logicweave.pb.zig") });
     const protobuf_dep = b.dependency("protobuf", .{});
 
     // Fetch shared firmware options ONCE before the loop
@@ -36,7 +36,7 @@ pub fn build(b: *Build) void {
 fn generate_protobuf_bindings(b: *Build, host_target: std.Build.ResolvedTarget) void {
     const protobuf_generated_path = "src/proto_gen/";
     const protobuf_def_path = "proto/";
-    const definition_file = "all.proto";
+    const definition_file = "logicweave.proto";
 
     // 1. Generate Python Protobuf code
     const gen_python_proto_cmd = b.addSystemCommand(&.{

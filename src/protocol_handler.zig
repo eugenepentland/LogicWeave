@@ -1,7 +1,7 @@
 // src/protocol_handler.zig
 const std = @import("std");
 const microzig = @import("microzig");
-const messages = @import("proto_gen/all.pb.zig");
+const messages = @import("proto_gen/logicweave.pb.zig");
 const protobuf = @import("protobuf");
 const firmware_config = @import("firmware_config");
 // Import our new modules

@@ -112,7 +112,7 @@ pub fn build(b: *Build) void {
 
     flash_tool.root_module.addImport("protobuf", pb_host_dep.module("protobuf"));
 
-    const messages_mod = b.createModule(.{ .root_source_file = b.path("../proto_gen/all.pb.zig") });
+    const messages_mod = b.createModule(.{ .root_source_file = b.path("../proto_gen/logicweave.pb.zig") });
     messages_mod.addImport("protobuf", pb_host_dep.module("protobuf"));
 
     flash_tool.root_module.addImport("messages", messages_mod);
