@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package logicweave;
+package logicweave_core;
 
 
 message AppMessage {
@@ -52,10 +52,17 @@ message AppMessage {
     Empty sleep_ms_response = 66;
     GPIOReadFunctionResponse gpio_read_function_response = 68;
 
-    // Custom requests
-
-    // Custom responses
+    ReadVoltageRequest read_voltage_request = 71;
+    ReadVoltageResponse read_voltage_response = 73;
   }
+}
+
+message ReadVoltageRequest {
+  uint32 info = 1;
+}
+
+message ReadVoltageResponse {
+    uint32 voltage = 1;
 }
 
 enum GpioFunction {

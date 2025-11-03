@@ -32,8 +32,8 @@
             .hash = "serial-0.0.1-PoeRzF60AAAN8Iu0yXTIX-t3DVzsnmN7vWHKM2HA2Zbq",
         },
         .protobuf = .{
-            .url = "https://github.com/Arwalk/zig-protobuf/archive/refs/tags/v3.0.0.tar.gz",
-            .hash = "protobuf-2.0.0-0e82an3rJACrCrLX7sohjL3qQIcDUV_x7NgEo1AORXUD",
+            .url = "https://github.com/Arwalk/zig-protobuf/archive/refs/tags/v3.0.1.tar.gz",
+            .hash = "protobuf-3.0.0-0e82aqDhJwD5l0ZV3WJ9tcRS0v5SD8ofIQa3mYJQzeor",
         },
     },
 

@@ -72,7 +72,7 @@ fn get_firmware_path(allocator: std.mem.Allocator) ![]u8 {
     return try allocator.dupe(u8, file_name);
 }
 
-pub fn set_usb_boot(port_name: []const u8, allocator: std.mem.Allocator) !void {
+pub fn set_usb_boot(port_name: []const u8, _: std.mem.Allocator) !void {
     var serial = try openDevice(port_name);
     defer serial.close();
 
@@ -84,21 +84,13 @@ pub fn set_usb_boot(port_name: []const u8, allocator: std.mem.Allocator) !void {
         .handshake = .none,
     });
 
-    const msg = messages.AppMessage{
-        .kind = messages.AppMessage.kind_union{
-            .usb_bootloader_request = .{ .val = 1 },
-        },
-    };
-
     // Encode to bytes
-    var buff: [32]u8 = undefined;
-    var writer = std.Io.Writer.fixed(&buff);
-
-    try writer.writeByte(5); //prepend the lgenth of the message
-    try protobuf.encode(&writer, allocator, msg);
+    var buff: [2]u8 = undefined;
+    buff[0] = 1;
+    buff[1] = 1;
 
     var serial_writer = serial.writer(&.{});
-    _ = try serial_writer.interface.writeAll(writer.buffered());
+    _ = try serial_writer.interface.writeAll(&buff);
     std.log.info("Successfully put into boot mode", .{});
 }
 

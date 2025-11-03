@@ -74,6 +74,8 @@ pub fn build(b: *Build) void {
     const mb = MicroBuild.init(b, mz_dep) orelse return;
     const lw_mod = lw_dep.module("logicweave");
 
+    const pb_dep = b.dependency("protobuf", .{});
+
     // Build only the selected example
     const pico_target = switch (ex.target) {
         .RP2040 => mb.ports.rp2xxx.boards.raspberrypi.pico,
@@ -91,8 +93,15 @@ pub fn build(b: *Build) void {
         .root_source_file = b.path(ex.file),
     });
 
+    const messages_mod = b.createModule(.{ .root_source_file = b.path("../proto_gen/logicweave.pb.zig") });
+    const lw_core_mod = b.createModule(.{ .root_source_file = b.path("../proto_gen/logicweave_core.pb.zig") });
+    lw_core_mod.addImport("protobuf", pb_dep.module("protobuf"));
+
     // Now, just tell the firmware about your logicweave module.
     fw.add_app_import("logicweave", lw_mod, .{ .depend_on_microzig = true });
+    fw.add_app_import("protobuf", pb_dep.module("protobuf"), .{});
+    fw.add_app_import("lw_core", lw_core_mod, .{});
+    fw.add_app_import("lw_standard", messages_mod, .{});
 
     // Create an install step for the firmware and capture the artifact object.
     const fw_install = mb.add_install_firmware(fw, .{});
@@ -108,12 +117,9 @@ pub fn build(b: *Build) void {
         .root_module = flash_mod,
     });
 
-    const pb_host_dep = b.dependency("protobuf", .{});
+    flash_tool.root_module.addImport("protobuf", pb_dep.module("protobuf"));
 
-    flash_tool.root_module.addImport("protobuf", pb_host_dep.module("protobuf"));
-
-    const messages_mod = b.createModule(.{ .root_source_file = b.path("../proto_gen/logicweave.pb.zig") });
-    messages_mod.addImport("protobuf", pb_host_dep.module("protobuf"));
+    messages_mod.addImport("protobuf", pb_dep.module("protobuf"));
 
     flash_tool.root_module.addImport("messages", messages_mod);
 

@@ -9,7 +9,6 @@ pub fn build(b: *Build) void {
 
     // Add protobuf depedencies
     generate_protobuf_bindings(b, host_target);
-    const messages_mod = b.createModule(.{ .root_source_file = b.path("src/proto_gen/logicweave.pb.zig") });
     const protobuf_dep = b.dependency("protobuf", .{});
 
     // Fetch shared firmware options ONCE before the loop
@@ -29,34 +28,39 @@ pub fn build(b: *Build) void {
 
     // Add the imports into my logicweave module
     lw_mod.addImport("protobuf", protobuf_dep.module("protobuf"));
-    lw_mod.addImport("protocol", messages_mod);
 }
 
-// --- Function to handle all Protobuf operations ---
-fn generate_protobuf_bindings(b: *Build, host_target: std.Build.ResolvedTarget) void {
+fn generate_protobuf_bindings(b: *std.Build, host_target: std.Build.ResolvedTarget) void {
     const protobuf_generated_path = "src/proto_gen/";
     const protobuf_def_path = "proto/";
-    const definition_file = "logicweave.proto";
+    // Removed the single 'definition_file' declaration, as it's now handled by the loop variable.
+
+    const definition_files: []const []const u8 = &.{ "logicweave.proto", "logicweave_core.proto" };
 
     // 1. Generate Python Protobuf code
+    // We must ensure the step name is unique for each file (e.g., gen-python-proto-logicweave.proto)
+    const py_step_name = "gen-python-proto";
     const gen_python_proto_cmd = b.addSystemCommand(&.{
         "protoc",
         "-I=" ++ protobuf_def_path,
         "--python_out=software/src/LogicWeave/proto_gen",
-        protobuf_def_path ++ definition_file,
+        protobuf_def_path ++ definition_files[0],
+        protobuf_def_path ++ definition_files[1],
     });
-    gen_python_proto_cmd.step.name = "gen-python-proto";
+    gen_python_proto_cmd.step.name = py_step_name;
     b.getInstallStep().dependOn(&gen_python_proto_cmd.step);
 
     // 2. Generate Zig Protobuf code
+    const zig_step_name = "gen-zig-proto";
     const protobuf_dep = b.dependency("protobuf", .{ .target = host_target });
-    const protoc_step = protobuf.RunProtocStep.create(b, protobuf_dep.builder, host_target, .{
+    const protoc_step = protobuf.RunProtocStep.create(protobuf_dep.builder, host_target, .{
         .destination_directory = b.path(protobuf_generated_path),
-        .source_files = &.{definition_file},
+        .source_files = &.{ definition_files[0], definition_files[1] },
         .include_directories = &.{protobuf_def_path},
     });
+    protoc_step.step.name = zig_step_name;
 
-    // Make the Zig Protobuf step depend on the Python Protobuf step, to ensure order
-    protoc_step.step.dependOn(&gen_python_proto_cmd.step);
+    // Make the Zig Protobuf step depend on the Python Protobuf step for this specific file
+
     b.getInstallStep().dependOn(&protoc_step.step);
 }
