@@ -73,6 +73,16 @@ pub fn init(comptime ProtoDefType: anytype) type {
             return usb_rx_buff[0..total_read];
         }
 
+        fn enable_fpu() void {
+            var cpacr: u32 = microzig.cpu.peripherals.scb.CPACR;
+            cpacr |= 0xF << 20; // Sets bits 20-23 (CP10 and CP11) to 0b11
+            microzig.cpu.peripherals.scb.CPACR = cpacr;
+            microzig.cpu.peripherals.fpu.FPCCR.modify(.{
+                .ASPEN = 1,
+                .LSPEN = 1,
+            });
+        }
+
         pub fn usbTxWrite(buff: []const u8) void {
             if (buff.len == 0) return;
             shared_data_spinlock.lock();
@@ -86,6 +96,7 @@ pub fn init(comptime ProtoDefType: anytype) type {
         // --- Core 1 Logic (Protocol Handling) ---
 
         fn core1() void {
+            enable_fpu();
             // 1. Setup allocator for protocol handler
             var buff: [512]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&buff);

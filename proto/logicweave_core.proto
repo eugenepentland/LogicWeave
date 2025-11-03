@@ -62,7 +62,7 @@ message ReadVoltageRequest {
 }
 
 message ReadVoltageResponse {
-    uint32 voltage = 1;
+    float voltage = 1;
 }
 
 enum GpioFunction {

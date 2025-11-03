@@ -23,19 +23,19 @@ const Example = struct {
 // 4) Define Firmware Examples/Targets
 const examples = [_]Example{
     .{
-        .name = "logicweave_pico2_arm",
+        .name = "lw_pico2",
         .target = .RP2350,
-        .file = "src/pico.zig",
+        .file = "src/logicweave.zig",
     },
     .{
-        .name = "custom_handler",
+        .name = "lw_core",
         .target = .RP2350,
-        .file = "src/custom_usb_handler.zig",
+        .file = "src/logicweave_core.zig",
     },
     .{
-        .name = "logicweave_pico",
+        .name = "lw_pico",
         .target = .RP2040,
-        .file = "src/pico.zig",
+        .file = "src/logicweave.zig",
     },
 };
 

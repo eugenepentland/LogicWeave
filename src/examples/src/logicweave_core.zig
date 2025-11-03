@@ -10,8 +10,8 @@ fn usb_handler(allocator: std.mem.Allocator, message: messages.AppMessage, write
     if (message.kind) |kind_enum| {
         switch (kind_enum) {
             .read_voltage_request => {
-                //const vout = read_voltmeter();
-                const response = messages.AppMessage{ .kind = .{ .read_voltage_response = .{ .voltage = 100 } } };
+                const vout = read_voltmeter();
+                const response = messages.AppMessage{ .kind = .{ .read_voltage_response = .{ .voltage = vout } } };
                 return response.encode(writer, allocator) catch {};
             },
             else => {
@@ -28,7 +28,7 @@ const voltmeter_adc: rp2xxx.adc.Input = .ain6;
 const resistance_adc: rp2xxx.adc.Input = .ain7;
 const resistor_mux_a0 = rp2xxx.gpio.num(30);
 const resistor_mux_a1 = rp2xxx.gpio.num(31);
-const scale_factor: f32 = (56_000 + 10_000) / 10_000;
+const scale_factor: f32 = (56_000.0 + 10_000.0) / 10_000.0;
 
 pub fn main() !void {
     setup();
@@ -57,21 +57,20 @@ fn disable_all_circuits() void {
 fn enable_voltmeter() void {
     disable_all_circuits();
     voltmeter_switch.put(1);
-    rp2xxx.time.sleep_ms(5);
+    rp2xxx.time.sleep_ms(10);
 }
 
 fn enable_resistancemeter() void {
     disable_all_circuits();
     resistancemeter_switch.put(1);
-    rp2xxx.time.sleep_ms(5);
+    rp2xxx.time.sleep_ms(10);
 }
 
 fn read_voltmeter() f32 {
     enable_voltmeter();
-    // Select the ADC
     rp2xxx.adc.select_input(voltmeter_adc);
     const sample = rp2xxx.adc.convert_one_shot_blocking(voltmeter_adc) catch 1;
-    const vout: f32 = (@as(f32, @floatFromInt(sample)) / 4095) * 3.3;
+    const vout: f32 = (@as(f32, @floatFromInt(sample)) / 4095.0) * 3.3;
 
     const v_in = vout * scale_factor * 1.01;
     disable_all_circuits();

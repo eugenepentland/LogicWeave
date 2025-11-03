@@ -306,7 +306,6 @@ class LogicWeave:
         """Sends a request and parses the expected response, simplifying error handling."""
         response_app_msg = self._execute_transaction(request_payload)
         response_field = response_app_msg.WhichOneof("kind")
-        print(response_app_msg)
         if response_field == "error_response":
             raise DeviceFirmwareError(f"Device error: {response_app_msg.error_response.message}")
 

@@ -202,7 +202,7 @@ class LogicWeaveCore(LogicWeave):
         # Start with an initial guess for the DAC value
         self.enable_channel(channel, False)
         current_dac_value = self._voltage_to_dac(voltage)
-        self.dac.set_voltage(channel=dac_channel, value=current_dac_value)
+        self.dac.set_voltage(channel=channel, value=current_dac_value)
         time.sleep(0.05)
         self.enable_channel(channel, True)
 

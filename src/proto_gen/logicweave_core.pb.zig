@@ -320,10 +320,10 @@ pub const ReadVoltageRequest = struct {
 };
 
 pub const ReadVoltageResponse = struct {
-    voltage: u32 = 0,
+    voltage: f64 = 0,
 
     pub const _desc_table = .{
-        .voltage = fd(1, .{ .scalar = .uint32 }),
+        .voltage = fd(1, .{ .scalar = .double }),
     };
 
     /// Encodes the message to the writer
