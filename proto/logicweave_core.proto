@@ -2,8 +2,7 @@ syntax = "proto3";
 
 package logicweave_core;
 
-
-message AppMessage {
+message RequestMessage {
   oneof kind {
     // Standard requests
     GPIOFunctionRequest gpio_function_request = 1;
@@ -27,34 +26,37 @@ message AppMessage {
     PWMSetLevelRequest pwm_set_level_request = 63;
     SleepMsRequest sleep_ms_request = 65;
     GPIOReadFunctionRequest gpio_read_function_request = 67;
-
-    // Standard Responses
-    ErrorResponse error_response = 10;
-    Empty gpio_function_response = 42;
-    Empty gpio_write_response = 5;
-    Empty usb_bootloader_response = 9;
-    GPIOReadResponse gpio_read_response = 7;
-    Empty i2c_setup_response = 12;
-    Empty i2c_write_response = 14;
-    I2CReadResponse i2c_read_response = 16;
-    Empty spi_setup_response = 18;
-    SPIReadResponse spi_read_response = 20;
-    Empty spi_write_response = 22;
-    FirmwareInfoResponse firmware_info_response = 37;
-    Empty uart_setup_response = 50;
-    UartReadResponse uart_read_response = 52;
-    Empty uart_write_response = 54;
-    Empty gpio_pin_pull_response = 56;
-    ADCReadResponse adc_read_response = 58;
-    I2CWriteThenReadResponse i2c_write_then_read_response = 60;
-    Empty pwm_setup_response = 62;
-    Empty pwm_set_level_response = 64;
-    Empty sleep_ms_response = 66;
-    GPIOReadFunctionResponse gpio_read_function_response = 68;
-
     ReadVoltageRequest read_voltage_request = 71;
-    ReadVoltageResponse read_voltage_response = 73;
   }
+};
+
+message ResponseMessage {
+    // Standard Responses
+    oneof kind {
+      ErrorResponse error_response = 10;
+      Empty gpio_function_response = 42;
+      Empty gpio_write_response = 5;
+      Empty usb_bootloader_response = 9;
+      GPIOReadResponse gpio_read_response = 7;
+      Empty i2c_setup_response = 12;
+      Empty i2c_write_response = 14;
+      I2CReadResponse i2c_read_response = 16;
+      Empty spi_setup_response = 18;
+      SPIReadResponse spi_read_response = 20;
+      Empty spi_write_response = 22;
+      FirmwareInfoResponse firmware_info_response = 37;
+      Empty uart_setup_response = 50;
+      UartReadResponse uart_read_response = 52;
+      Empty uart_write_response = 54;
+      Empty gpio_pin_pull_response = 56;
+      ADCReadResponse adc_read_response = 58;
+      I2CWriteThenReadResponse i2c_write_then_read_response = 60;
+      Empty pwm_setup_response = 62;
+      Empty pwm_set_level_response = 64;
+      Empty sleep_ms_response = 66;
+      GPIOReadFunctionResponse gpio_read_function_response = 68;
+      ReadVoltageResponse read_voltage_response = 73;
+    }
 }
 
 message ReadVoltageRequest {

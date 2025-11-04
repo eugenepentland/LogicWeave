@@ -6,16 +6,16 @@ const rp2xxx = microzig.hal;
 const has_rp2350b = rp2xxx.compatibility.has_rp2350b;
 const lw = logicweave.init(messages);
 
-fn usb_handler(allocator: std.mem.Allocator, message: messages.AppMessage, writer: *std.Io.Writer) void {
+fn usb_handler(allocator: std.mem.Allocator, message: messages.RequestMessage, writer: *std.Io.Writer) void {
     if (message.kind) |kind_enum| {
         switch (kind_enum) {
             .read_voltage_request => {
                 const vout = read_voltmeter();
-                const response = messages.AppMessage{ .kind = .{ .read_voltage_response = .{ .voltage = vout } } };
+                const response = messages.ResponseMessage{ .kind = .{ .read_voltage_response = .{ .voltage = vout } } };
                 return response.encode(writer, allocator) catch {};
             },
             else => {
-                const response = messages.AppMessage{ .kind = .{ .error_response = .{ .message = "Erorr reading request" } } };
+                const response = messages.ResponseMessage{ .kind = .{ .error_response = .{ .message = "Erorr reading request" } } };
                 response.encode(writer, allocator) catch {};
             },
         }

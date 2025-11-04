@@ -35,7 +35,7 @@ pub const PinPullState = enum(i32) {
     _,
 };
 
-pub const AppMessage = struct {
+pub const RequestMessage = struct {
     kind: ?kind_union = null,
 
     pub const _kind_case = enum {
@@ -60,6 +60,126 @@ pub const AppMessage = struct {
         pwm_set_level_request,
         sleep_ms_request,
         gpio_read_function_request,
+    };
+    pub const kind_union = union(_kind_case) {
+        gpio_function_request: GPIOFunctionRequest,
+        gpio_write_request: GPIOWriteRequest,
+        usb_bootloader_request: UsbBootloaderRequest,
+        gpio_read_request: GPIOReadRequest,
+        i2c_setup_request: I2CSetupRequest,
+        i2c_write_request: I2CWriteRequest,
+        i2c_read_request: I2CReadRequest,
+        spi_setup_request: SPISetupRequest,
+        spi_read_request: SPIReadRequest,
+        spi_write_request: SPIWriteRequest,
+        firmware_info_request: FirmwareInfoRequest,
+        uart_setup_request: UartSetupRequest,
+        uart_read_request: UartReadRequest,
+        uart_write_request: UartWriteRequest,
+        gpio_pin_pull_request: GpioPinPullRequest,
+        adc_read_request: ADCReadRequest,
+        i2c_write_then_read_request: I2CWriteThenReadRequest,
+        pwm_setup_request: PWMSetupRequest,
+        pwm_set_level_request: PWMSetLevelRequest,
+        sleep_ms_request: SleepMsRequest,
+        gpio_read_function_request: GPIOReadFunctionRequest,
+        pub const _desc_table = .{
+            .gpio_function_request = fd(1, .submessage),
+            .gpio_write_request = fd(3, .submessage),
+            .usb_bootloader_request = fd(4, .submessage),
+            .gpio_read_request = fd(6, .submessage),
+            .i2c_setup_request = fd(11, .submessage),
+            .i2c_write_request = fd(13, .submessage),
+            .i2c_read_request = fd(15, .submessage),
+            .spi_setup_request = fd(17, .submessage),
+            .spi_read_request = fd(19, .submessage),
+            .spi_write_request = fd(21, .submessage),
+            .firmware_info_request = fd(36, .submessage),
+            .uart_setup_request = fd(49, .submessage),
+            .uart_read_request = fd(51, .submessage),
+            .uart_write_request = fd(53, .submessage),
+            .gpio_pin_pull_request = fd(55, .submessage),
+            .adc_read_request = fd(57, .submessage),
+            .i2c_write_then_read_request = fd(59, .submessage),
+            .pwm_setup_request = fd(61, .submessage),
+            .pwm_set_level_request = fd(63, .submessage),
+            .sleep_ms_request = fd(65, .submessage),
+            .gpio_read_function_request = fd(67, .submessage),
+        };
+    };
+
+    pub const _desc_table = .{
+        .kind = fd(null, .{ .oneof = kind_union }),
+    };
+
+    /// Encodes the message to the writer
+    /// The allocator is used to generate submessages internally.
+    /// Hence, an ArenaAllocator is a preferred choice if allocations are a bottleneck.
+    pub fn encode(
+        self: @This(),
+        writer: *std.Io.Writer,
+        allocator: std.mem.Allocator,
+    ) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+        return protobuf.encode(writer, allocator, self);
+    }
+
+    /// Decodes the message from the bytes read from the reader.
+    pub fn decode(
+        reader: *std.Io.Reader,
+        allocator: std.mem.Allocator,
+    ) (protobuf.DecodingError || std.Io.Reader.Error || std.mem.Allocator.Error)!@This() {
+        return protobuf.decode(@This(), reader, allocator);
+    }
+
+    /// Deinitializes and frees the memory associated with the message.
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        return protobuf.deinit(allocator, self);
+    }
+
+    /// Duplicates the message.
+    pub fn dupe(self: @This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
+        return protobuf.dupe(@This(), self, allocator);
+    }
+
+    /// Decodes the message from the JSON string.
+    pub fn jsonDecode(
+        input: []const u8,
+        options: std.json.ParseOptions,
+        allocator: std.mem.Allocator,
+    ) !std.json.Parsed(@This()) {
+        return protobuf.json.decode(@This(), input, options, allocator);
+    }
+
+    /// Encodes the message to a JSON string.
+    pub fn jsonEncode(
+        self: @This(),
+        options: std.json.Stringify.Options,
+        allocator: std.mem.Allocator,
+    ) ![]const u8 {
+        return protobuf.json.encode(self, options, allocator);
+    }
+
+    /// This method is used by std.json
+    /// internally for deserialization. DO NOT RENAME!
+    pub fn jsonParse(
+        allocator: std.mem.Allocator,
+        source: anytype,
+        options: std.json.ParseOptions,
+    ) !@This() {
+        return protobuf.json.parse(@This(), allocator, source, options);
+    }
+
+    /// This method is used by std.json
+    /// internally for serialization. DO NOT RENAME!
+    pub fn jsonStringify(self: *const @This(), jws: anytype) !void {
+        return protobuf.json.stringify(@This(), self, jws);
+    }
+};
+
+pub const ResponseMessage = struct {
+    kind: ?kind_union = null,
+
+    pub const _kind_case = enum {
         error_response,
         gpio_function_response,
         gpio_write_response,
@@ -84,27 +204,6 @@ pub const AppMessage = struct {
         gpio_read_function_response,
     };
     pub const kind_union = union(_kind_case) {
-        gpio_function_request: GPIOFunctionRequest,
-        gpio_write_request: GPIOWriteRequest,
-        usb_bootloader_request: UsbBootloaderRequest,
-        gpio_read_request: GPIOReadRequest,
-        i2c_setup_request: I2CSetupRequest,
-        i2c_write_request: I2CWriteRequest,
-        i2c_read_request: I2CReadRequest,
-        spi_setup_request: SPISetupRequest,
-        spi_read_request: SPIReadRequest,
-        spi_write_request: SPIWriteRequest,
-        firmware_info_request: FirmwareInfoRequest,
-        uart_setup_request: UartSetupRequest,
-        uart_read_request: UartReadRequest,
-        uart_write_request: UartWriteRequest,
-        gpio_pin_pull_request: GpioPinPullRequest,
-        adc_read_request: ADCReadRequest,
-        i2c_write_then_read_request: I2CWriteThenReadRequest,
-        pwm_setup_request: PWMSetupRequest,
-        pwm_set_level_request: PWMSetLevelRequest,
-        sleep_ms_request: SleepMsRequest,
-        gpio_read_function_request: GPIOReadFunctionRequest,
         error_response: ErrorResponse,
         gpio_function_response: Empty,
         gpio_write_response: Empty,
@@ -128,27 +227,6 @@ pub const AppMessage = struct {
         sleep_ms_response: Empty,
         gpio_read_function_response: GPIOReadFunctionResponse,
         pub const _desc_table = .{
-            .gpio_function_request = fd(1, .submessage),
-            .gpio_write_request = fd(3, .submessage),
-            .usb_bootloader_request = fd(4, .submessage),
-            .gpio_read_request = fd(6, .submessage),
-            .i2c_setup_request = fd(11, .submessage),
-            .i2c_write_request = fd(13, .submessage),
-            .i2c_read_request = fd(15, .submessage),
-            .spi_setup_request = fd(17, .submessage),
-            .spi_read_request = fd(19, .submessage),
-            .spi_write_request = fd(21, .submessage),
-            .firmware_info_request = fd(36, .submessage),
-            .uart_setup_request = fd(49, .submessage),
-            .uart_read_request = fd(51, .submessage),
-            .uart_write_request = fd(53, .submessage),
-            .gpio_pin_pull_request = fd(55, .submessage),
-            .adc_read_request = fd(57, .submessage),
-            .i2c_write_then_read_request = fd(59, .submessage),
-            .pwm_setup_request = fd(61, .submessage),
-            .pwm_set_level_request = fd(63, .submessage),
-            .sleep_ms_request = fd(65, .submessage),
-            .gpio_read_function_request = fd(67, .submessage),
             .error_response = fd(10, .submessage),
             .gpio_function_response = fd(42, .submessage),
             .gpio_write_response = fd(5, .submessage),

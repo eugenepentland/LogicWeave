@@ -18,7 +18,6 @@ pub fn init(comptime ProtoDefType: anytype) type {
         // --- Standard Public/Internal Constants and Variables ---
 
         pub const protobuf = @import("protobuf");
-        pub const Interrupt = @import("interrupts.zig");
         const peripherals = microzig.chip.peripherals;
         const time = rp2xxx.time;
         const usb = rp2xxx.usb;
@@ -29,9 +28,9 @@ pub fn init(comptime ProtoDefType: anytype) type {
         var usb_rx_buff: [128]u8 = undefined;
         var usb_tx_buff: [128]u8 = undefined;
         pub var usb_writer: std.Io.Writer = .fixed(&usb_tx_buff);
-        pub var custom_usb_handler: ?*const fn (std.mem.Allocator, ProtoDef.AppMessage, *std.Io.Writer) void = null;
+        pub var custom_usb_handler: ?*const fn (std.mem.Allocator, ProtoDef.RequestMessage, *std.Io.Writer) void = null;
         const shared_data_spinlock = rp2xxx.multicore.Spinlock.init(0);
-        var stack: [8192]u32 = undefined;
+        var core1_stack: [4096]u32 = undefined;
 
         // --- Helpers ---
 
@@ -98,38 +97,37 @@ pub fn init(comptime ProtoDefType: anytype) type {
         fn core1() void {
             enable_fpu();
             // 1. Setup allocator for protocol handler
-            var buff: [512]u8 = undefined;
+            var buff: [256]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&buff);
             const allocator = fba.allocator();
 
             while (true) {
                 // Wait for usb data length in the fifo
-                handleProcessRx(allocator);
+                if (rp2xxx.multicore.fifo.read()) |message_len| {
+                    handleProcessRx(allocator, message_len);
+                    fba.reset();
+                }
             }
         }
 
-        fn handleProcessRx(allocator: std.mem.Allocator) void {
-            if (rp2xxx.multicore.fifo.read()) |message_len| {
+        fn handleProcessRx(allocator: std.mem.Allocator, message_len: u32) void {
+            // Get the slice into a reader
+            shared_data_spinlock.lock();
+            const incoming_data = shared_usb_rx_buff[0..message_len];
+            shared_data_spinlock.unlock();
 
-                // Get the slice into a reader
-                shared_data_spinlock.lock();
-                const incoming_data = shared_usb_rx_buff[0..message_len];
+            var reader: std.Io.Reader = std.Io.Reader.fixed(incoming_data);
+            // Get the response kind
+            protocol_handler.handle_incoming_usb(allocator, &reader, &usb_writer, ProtoDef, custom_usb_handler) catch |err| {
+                var err_buff: [64]u8 = undefined;
+                const formatted_err = std.fmt.bufPrint(err_buff[0..], "Handle Err: {any}", .{err}) catch "format error";
+                const response = ProtoDef.ResponseMessage{ .kind = .{ .error_response = .{ .message = formatted_err } } };
+                response.encode(&usb_writer, allocator) catch {};
+            };
 
-                var reader: std.Io.Reader = std.Io.Reader.fixed(incoming_data);
-                // Get the response kind
-                protocol_handler.handle_incoming_usb(allocator, &reader, &usb_writer, ProtoDef, custom_usb_handler) catch |err| {
-                    var err_buff: [64]u8 = undefined;
-                    const formatted_err = std.fmt.bufPrint(err_buff[0..], "Handle Err: {any}", .{err}) catch "format error";
-                    const response = ProtoDef.AppMessage{ .kind = .{ .error_response = .{ .message = formatted_err } } };
-                    response.encode(&usb_writer, allocator) catch {};
-                };
-
-                shared_data_spinlock.unlock();
-
-                // Copy it over to the shared tx buffer
-                usbTxWrite(usb_writer.buffered());
-                usb_writer.end = 0;
-            }
+            // Copy it over to the shared tx buffer
+            usbTxWrite(usb_writer.buffered());
+            _ = usb_writer.consumeAll();
         }
 
         // --- Core 0 Logic (USB Polling) ---
@@ -170,7 +168,7 @@ pub fn init(comptime ProtoDefType: anytype) type {
             usb_dev.init_device(&usb_cfg.DEVICE_CONFIGURATION) catch unreachable;
 
             // Start the 2nd core
-            rp2xxx.multicore.launch_core1_with_stack(&core1, &stack);
+            rp2xxx.multicore.launch_core1_with_stack(&core1, &core1_stack);
 
             // Run the main loop
             // Main loop

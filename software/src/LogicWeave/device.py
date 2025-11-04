@@ -249,7 +249,7 @@ class LogicWeave:
     # --- Core Communication Logic ---
     def _execute_transaction(self, specific_message_payload):
         # Now uses self.pb
-        app_message = self.pb.AppMessage()
+        app_message = self.pb.RequestMessage()
         
         field_name = None
         for field in app_message.DESCRIPTOR.fields:
@@ -284,7 +284,7 @@ class LogicWeave:
         response_length_byte = self.ser.read(1)
         if not response_length_byte:
             # Timeout occurred - Now returns an empty AppMessage from the injected module
-            return self.pb.AppMessage() 
+            return self.pb.ResponseMessage() 
 
         response_length = response_length_byte[0]
         
@@ -296,7 +296,7 @@ class LogicWeave:
         # Parse response
         try:
             # Now uses self.pb
-            parsed_response = self.pb.AppMessage()
+            parsed_response = self.pb.ResponseMessage()
             parsed_response.ParseFromString(response_bytes)
             return parsed_response
         except Exception as e:
@@ -313,7 +313,7 @@ class LogicWeave:
         if response_field is None:
             try:
                 # Now uses self.pb
-                field_descriptor = self.pb.AppMessage.DESCRIPTOR.fields_by_name[expected_response_field]
+                field_descriptor = self.pb.ResponseMessage.DESCRIPTOR.fields_by_name[expected_response_field]
                 is_truly_empty = len(field_descriptor.message_type.fields) == 0
                 
                 if is_truly_empty:
