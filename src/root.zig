@@ -1,4 +1,3 @@
-// src/root.zig
 pub const protocol_handler = @import("protocol_handler.zig");
 
 pub fn init(comptime ProtoDefType: anytype) type {
@@ -31,7 +30,11 @@ pub fn init(comptime ProtoDefType: anytype) type {
         pub var usb_writer: std.Io.Writer = .fixed(&usb_tx_buff);
         pub const custom_usb_handler_type = ?*const fn (std.mem.Allocator, ProtoDef.RequestMessage) ProtoDef.ResponseMessage.kind_union;
         pub var custom_usb_handler: custom_usb_handler_type = null;
-        const shared_data_spinlock = rp2xxx.multicore.Spinlock.init(0);
+
+        // Separate spinlocks for RX and TX shared buffers
+        const rx_spinlock = rp2xxx.multicore.Spinlock.init(0);
+        const tx_spinlock = rp2xxx.multicore.Spinlock.init(1);
+
         var core1_stack: [4096]u32 = undefined;
 
         // --- Helpers ---
@@ -86,8 +89,8 @@ pub fn init(comptime ProtoDefType: anytype) type {
 
         pub fn usbTxWrite(buff: []const u8) void {
             if (buff.len == 0) return;
-            shared_data_spinlock.lock();
-            defer shared_data_spinlock.unlock();
+            tx_spinlock.lock();
+            defer tx_spinlock.unlock();
 
             // Send the response
             std.mem.copyForwards(u8, &shared_usb_tx_buff, buff);
@@ -114,9 +117,9 @@ pub fn init(comptime ProtoDefType: anytype) type {
 
         fn handleProcessRx(allocator: std.mem.Allocator, message_len: u32) void {
             // Get the slice into a reader
-            shared_data_spinlock.lock();
+            rx_spinlock.lock();
             const incoming_data = shared_usb_rx_buff[0..message_len];
-            shared_data_spinlock.unlock();
+            rx_spinlock.unlock();
 
             var reader: std.Io.Reader = std.Io.Reader.fixed(incoming_data);
             // Get the response kind
@@ -139,12 +142,13 @@ pub fn init(comptime ProtoDefType: anytype) type {
             const rx_data = usb_read();
             if (rx_data.len > 0) {
                 if (rx_data.len == 2 and rx_data[1] == 1) rp2xxx.rom.reset_to_usb_boot();
+
                 // Copy the data to the shared memory
-                shared_data_spinlock.lock();
+                rx_spinlock.lock();
                 std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data[1..]); //Ignore the first byte, its a length prefix
                 // Write the request to the webui
                 usb_write(.webui, rx_data[1..]);
-                shared_data_spinlock.unlock();
+                rx_spinlock.unlock();
 
                 // Signal to core1 data is ready and what its length it
                 rp2xxx.multicore.fifo.write_blocking(@intCast(rx_data.len - 1));
@@ -154,10 +158,10 @@ pub fn init(comptime ProtoDefType: anytype) type {
         fn handleUsbTx() void {
             // Writes a response to the fifo if it gets any
             if (rp2xxx.multicore.fifo.read()) |len| {
-                shared_data_spinlock.lock();
+                tx_spinlock.lock();
                 if (len == 1) rp2xxx.rom.reset_to_usb_boot();
 
-                defer shared_data_spinlock.unlock();
+                defer tx_spinlock.unlock();
                 usb_write(.driver, shared_usb_tx_buff[0..len]);
                 usb_write(.webui, shared_usb_tx_buff[0..len]);
             }
