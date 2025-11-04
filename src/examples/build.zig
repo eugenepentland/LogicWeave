@@ -106,10 +106,26 @@ pub fn build(b: *Build) void {
     // Create an install step for the firmware and capture the artifact object.
     const fw_install = mb.add_install_firmware(fw, .{});
 
+    const host_target = b.standardTargetOptions(.{});
     const flash_mod = b.addModule("flash", .{
         .root_source_file = b.path("tools/flash.zig"),
-        .target = b.standardTargetOptions(.{}),
+        .target = host_target,
     });
+
+    const speed_test_mod = b.addModule("speed", .{
+        .root_source_file = b.path("tools/speed_test.zig"),
+        .target = host_target,
+        .optimize = .ReleaseFast,
+    });
+
+    // 1. Build the 'flash.zig' utility as an executable
+    const speed_test_tool = b.addExecutable(.{
+        .name = "speed",
+        .root_module = speed_test_mod,
+    });
+
+    speed_test_tool.root_module.addImport("protobuf", pb_dep.module("protobuf"));
+    speed_test_tool.root_module.addImport("messages", messages_mod);
 
     // 1. Build the 'flash.zig' utility as an executable
     const flash_tool = b.addExecutable(.{
@@ -125,8 +141,18 @@ pub fn build(b: *Build) void {
 
     const serial = b.dependency("serial", .{});
     flash_tool.root_module.addImport("serial", serial.module("serial"));
+    speed_test_tool.root_module.addImport("serial", serial.module("serial"));
 
     b.installArtifact(flash_tool);
+    b.installArtifact(speed_test_tool);
+
+    const speed_test_step = b.step("speed", "Builds the firmware and runs the speed test utility.");
+
+    const speed_command = b.addRunArtifact(speed_test_tool);
+    speed_command.step.dependOn(&speed_test_tool.step); // Depend on the tool's build
+    speed_command.step.dependOn(&fw_install.step); // **NEW:** Depend on the firmware install
+
+    speed_test_step.dependOn(&speed_command.step);
 
     // 2. Create the 'flash' step
     const flash_step = b.step("flash", "Builds and flashes the selected firmware to the target device.");

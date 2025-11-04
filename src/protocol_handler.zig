@@ -370,7 +370,8 @@ fn process_request(allocator: std.mem.Allocator, ProtoDef: type, message: ProtoD
 }
 
 pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader, writer: *std.Io.Writer, ProtoDef: type, custom_handler: ?*const fn (std.mem.Allocator, ProtoDef.RequestMessage) ProtoDef.ResponseMessage.kind_union) !void {
-    const msg = ProtoDef.RequestMessage.decode(reader, allocator) catch return error.ErrorDecoding;
+    var msg = ProtoDef.RequestMessage.decode(reader, allocator) catch return error.ErrorDecoding;
+    defer msg.deinit(allocator);
 
     const response_kind = process_request(allocator, ProtoDef, msg, custom_handler) catch @as(ProtoDef.ResponseMessage.kind_union, .{ .error_response = .{ .message = "error processing" } });
     const response = ProtoDef.ResponseMessage{ .kind = response_kind };
