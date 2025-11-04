@@ -16,13 +16,9 @@ const Duration = microzig.drivers.time.Duration;
 const has_rp2350b = rp2xxx.compatibility.has_rp2350b;
 
 // --- Public Hardware Control Functions ---
-pub fn getGPIO(gpio_enum: u32) rp2xxx.gpio.Pin {
+pub inline fn getGPIO(gpio_enum: u32) rp2xxx.gpio.Pin {
     const gpio_num: u6 = @intCast(gpio_enum);
     return rp2xxx.gpio.num(gpio_num);
-}
-
-pub fn encode_message(writer: *std.Io.Writer, allocator: std.mem.Allocator, ResponseMessage: type, kind: anytype) !void {
-    try protobuf.encode(writer, allocator, ResponseMessage{ .kind = kind });
 }
 
 // In main.zig or pwm_utils.zig
@@ -109,30 +105,24 @@ pub inline fn read_direction(gpio: rp2xxx.gpio.Pin) rp2xxx.gpio.Direction {
     }
 }
 
-pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader, writer: *std.Io.Writer, ProtoDef: type, custom_handler: ?*const fn (std.mem.Allocator, ProtoDef.RequestMessage, *std.Io.Writer) void) !void {
-    const RequestMessage = ProtoDef.RequestMessage;
-    const ResponseMessage = ProtoDef.ResponseMessage;
-    var msg = try RequestMessage.decode(reader, allocator);
-    defer msg.deinit(allocator);
-
+fn process_request(allocator: std.mem.Allocator, ProtoDef: type, message: ProtoDef.RequestMessage, custom_handler: ?*const fn (std.mem.Allocator, ProtoDef.RequestMessage) ProtoDef.ResponseMessage.kind_union) !ProtoDef.ResponseMessage.kind_union {
     // Match on the kind of message
-    if (msg.kind) |kind_enum| {
+    if (message.kind) |kind_enum| {
         switch (kind_enum) {
             .firmware_info_request => |_| {
                 const id_array = try getUniqueBoardId();
                 var id_buff: [17]u8 = undefined;
                 picoGetUniqueBoardIdString(&id_buff, id_array);
                 // Response created and encoded as requested (was already this way)
-                const response = ResponseMessage{ .kind = .{ .firmware_info_response = .{
+                return .{ .firmware_info_response = .{
                     .hash = firmware_config.GIT_HASH,
                     .version = firmware_config.version,
                     .serial_number = id_buff[0 .. id_buff.len - 1],
-                } } };
-                return response.encode(writer, allocator);
+                } };
             },
             .usb_bootloader_request => {
                 // This is a special response that just writes a byte
-                return try writer.writeByte(255);
+                return .{ .gpio_read_response = .{ .state = true } };
             },
             .gpio_read_function_request => |request| {
                 const pin: rp2xxx.gpio.Pin = @enumFromInt(request.gpio_pin);
@@ -154,15 +144,13 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     else => .none,
                 };
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .gpio_read_function_response = .{ .function = function } } };
-                return response.encode(writer, allocator);
+                return .{ .gpio_read_function_response = .{ .function = function } };
             },
             .gpio_read_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
                 const state = pin.read();
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .gpio_read_response = .{ .state = state != 0 } } };
-                return response.encode(writer, allocator);
+                return .{ .gpio_read_response = .{ .state = state != 0 } };
             },
             .adc_read_request => |request| {
                 const input = try gpio_to_adc_input(@intCast(request.gpio_pin));
@@ -172,15 +160,13 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
 
                 const sample = try rp2xxx.adc.convert_one_shot_blocking(input);
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .adc_read_response = .{ .sample = @intCast(sample) } } };
-                return response.encode(writer, allocator);
+                return .{ .adc_read_response = .{ .sample = @intCast(sample) } };
             },
             .gpio_write_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
                 pin.put(@intFromBool(request.state));
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .gpio_write_response = .{ .status = 200 } } };
-                return response.encode(writer, allocator);
+                return .{ .gpio_write_response = .{ .status = 200 } };
             },
             .pwm_setup_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
@@ -194,8 +180,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 }
                 pwm_ch.slice().enable();
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .pwm_setup_response = .{ .status = 200 } } };
-                return response.encode(writer, allocator);
+                return .{ .pwm_setup_response = .{ .status = 200 } };
             },
             .pwm_set_level_request => |request| {
                 const pwm_ch = get_pwm(@intCast(request.gpio_pin)) orelse {
@@ -203,8 +188,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 };
                 pwm_ch.set_level(@intCast(request.level));
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .pwm_set_level_response = .{ .status = 200 } } };
-                return response.encode(writer, allocator);
+                return .{ .pwm_set_level_response = .{ .status = 200 } };
             },
             .gpio_function_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
@@ -223,8 +207,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     else => {}, // Handle other modes if necessary, or make this an error
                 }
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .gpio_function_response = .{ .status = 200 } } };
-                return response.encode(writer, allocator);
+                return .{ .gpio_function_response = .{ .status = 200 } };
             },
             .uart_setup_request => |request| {
                 const tx_pin = getGPIO(request.tx_pin);
@@ -240,8 +223,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     .clock_config = rp2xxx.clock_config,
                 });
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .uart_setup_response = .{ .status = 200 } } };
-                return response.encode(writer, allocator);
+                return .{ .uart_setup_response = .{ .status = 200 } };
             },
             .uart_write_request => |request| {
                 const uart = rp2xxx.uart.instance.num(@intCast(request.instance_num));
@@ -251,13 +233,10 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     uart.clear_errors();
                 };
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .uart_write_response = .{ .status = 200 } } };
-                return response.encode(writer, allocator);
+                return .{ .uart_write_response = .{ .status = 200 } };
             },
             .uart_read_request => |request| {
                 var buff: []u8 = try allocator.alloc(u8, @truncate(request.byte_count));
-                // NOTE: We do NOT defer the deinit here because we return `buff` inside the response struct later,
-                // and the caller of `handle_incoming_usb` (via the message system) is responsible for deiniting the entire message.
 
                 const uart = rp2xxx.uart.instance.num(@intCast(request.instance_num));
 
@@ -265,8 +244,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     uart.clear_errors();
                 };
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .uart_read_response = .{ .data = buff[0..] } } };
-                return response.encode(writer, allocator);
+                return .{ .uart_read_response = .{ .data = buff[0..] } };
             },
             .spi_setup_request => |request| {
                 const mosi_pin = getGPIO(request.mosi_pin);
@@ -276,18 +254,13 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 const spi_instance = rp2xxx.spi.instance.num(@intCast(request.instance_num));
                 spi_instance.reset();
 
-                //const baud_rate: u32 = if (request.baud_rate > 0) request.baud_rate else 1_000_000;
-                //const peri_freq = comptime rp2xxx.clock_config.peri.?.frequency();
-                //try spi_instance.set_baudrate(baud_rate, peri_freq);
-
                 inline for (&.{ mosi_pin, sclk_pin, miso_pin }) |pin| {
                     pin.set_function(.spi);
                 }
                 try spi_instance.apply(.{ .clock_config = rp2xxx.clock_config });
 
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .spi_setup_response = .{ .status = 200 } } };
-                return response.encode(writer, allocator);
+                return .{ .spi_setup_response = .{ .status = 200 } };
             },
             .spi_write_request => |request| {
                 const spi_instance = rp2xxx.spi.instance.num(@truncate(request.instance_num));
@@ -304,12 +277,10 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 }
 
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .spi_write_response = .{ .status = 200 } } };
-                return response.encode(writer, allocator);
+                return .{ .spi_write_response = .{ .status = 200 } };
             },
             .spi_read_request => |request| {
                 const buff: []u8 = try allocator.alloc(u8, @truncate(request.byte_count));
-                defer allocator.free(buff); // Freeing buff since it's copied into the response struct (assuming encoding copies it)
 
                 const spi_instance = rp2xxx.spi.instance.num(@truncate(request.instance_num));
 
@@ -324,8 +295,7 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     spi_instance.read_blocking(u8, @truncate(request.data), buff);
                 }
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .spi_read_response = .{ .data = buff } } };
-                return response.encode(writer, allocator);
+                return .{ .spi_read_response = .{ .data = buff } };
             },
             .i2c_setup_request => |request| {
                 const sda_pin = getGPIO(request.sda_pin);
@@ -342,12 +312,10 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     .clock_config = rp2xxx.clock_config,
                 });
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .i2c_setup_response = .{ .status = 200 } } };
-                return response.encode(writer, allocator);
+                return .{ .i2c_setup_response = .{ .status = 200 } };
             },
             .i2c_read_request => |request| {
                 const buff: []u8 = try allocator.alloc(u8, @truncate(request.byte_count));
-                defer allocator.free(buff);
 
                 const i2c_instance = rp2xxx.i2c.instance.num(@truncate(request.instance_num));
                 const device_address: u7 = @truncate(request.device_address);
@@ -355,12 +323,10 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 i2c_instance.read_blocking(@enumFromInt(device_address), buff, Duration.from_ms(100)) catch {};
 
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .i2c_read_response = .{ .data = buff } } };
-                return response.encode(writer, allocator);
+                return .{ .i2c_read_response = .{ .data = buff } };
             },
             .i2c_write_then_read_request => |request| {
                 const buff: []u8 = try allocator.alloc(u8, @truncate(request.byte_count));
-                defer allocator.free(buff);
 
                 const i2c_instance = rp2xxx.i2c.instance.num(@truncate(request.instance_num));
                 const device_address: u7 = @truncate(request.device_address);
@@ -368,16 +334,14 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                 i2c_instance.write_then_read_blocking(@enumFromInt(device_address), request.data, buff, Duration.from_ms(100)) catch {};
 
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .i2c_write_then_read_response = .{ .data = buff } } };
-                return response.encode(writer, allocator);
+                return .{ .i2c_write_then_read_response = .{ .data = buff } };
             },
             .i2c_write_request => |request| {
                 const i2c_instance = rp2xxx.i2c.instance.num(@truncate(request.instance_num));
                 const device_address: u7 = @truncate(request.device_address);
                 try i2c_instance.write_blocking(@enumFromInt(device_address), request.data, null);
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .i2c_write_response = .{ .status = 200 } } };
-                return response.encode(writer, allocator);
+                return .{ .i2c_write_response = .{ .status = 200 } };
             },
             .gpio_pin_pull_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
@@ -388,22 +352,29 @@ pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader,
                     else => return error.InvalidPullState,
                 }
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .gpio_pin_pull_response = .{ .status = 200 } } };
-                return response.encode(writer, allocator);
+                return .{ .gpio_pin_pull_response = .{ .status = 200 } };
             },
             .sleep_ms_request => |request| {
                 rp2xxx.time.sleep_ms(@intCast(request.sleep_ms));
                 // Refactored to use explicit response constant
-                const response = ResponseMessage{ .kind = .{ .sleep_ms_response = .{ .status = 200 } } };
-                return response.encode(writer, allocator);
+                return .{ .sleep_ms_response = .{ .status = 200 } };
             },
             else => {
                 if (custom_handler) |handler| {
-                    return handler(allocator, msg, writer);
+                    return handler(allocator, message);
                 }
             },
         }
     }
+    return error.RequestNotFound;
+}
+
+pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader, writer: *std.Io.Writer, ProtoDef: type, custom_handler: ?*const fn (std.mem.Allocator, ProtoDef.RequestMessage) ProtoDef.ResponseMessage.kind_union) !void {
+    const msg = ProtoDef.RequestMessage.decode(reader, allocator) catch return error.ErrorDecoding;
+
+    const response_kind = process_request(allocator, ProtoDef, msg, custom_handler) catch @as(ProtoDef.ResponseMessage.kind_union, .{ .error_response = .{ .message = "error processing" } });
+    const response = ProtoDef.ResponseMessage{ .kind = response_kind };
+    response.encode(writer, allocator) catch return error.ErrorEncoding;
 }
 
 const rom = rp2xxx.rom;

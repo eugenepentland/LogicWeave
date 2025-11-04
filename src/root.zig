@@ -1,3 +1,4 @@
+// src/root.zig
 pub const protocol_handler = @import("protocol_handler.zig");
 
 pub fn init(comptime ProtoDefType: anytype) type {
@@ -28,7 +29,8 @@ pub fn init(comptime ProtoDefType: anytype) type {
         var usb_rx_buff: [128]u8 = undefined;
         var usb_tx_buff: [128]u8 = undefined;
         pub var usb_writer: std.Io.Writer = .fixed(&usb_tx_buff);
-        pub var custom_usb_handler: ?*const fn (std.mem.Allocator, ProtoDef.RequestMessage, *std.Io.Writer) void = null;
+        pub const custom_usb_handler_type = ?*const fn (std.mem.Allocator, ProtoDef.RequestMessage) ProtoDef.ResponseMessage.kind_union;
+        pub var custom_usb_handler: custom_usb_handler_type = null;
         const shared_data_spinlock = rp2xxx.multicore.Spinlock.init(0);
         var core1_stack: [4096]u32 = undefined;
 
@@ -120,7 +122,7 @@ pub fn init(comptime ProtoDefType: anytype) type {
             // Get the response kind
             protocol_handler.handle_incoming_usb(allocator, &reader, &usb_writer, ProtoDef, custom_usb_handler) catch |err| {
                 var err_buff: [64]u8 = undefined;
-                const formatted_err = std.fmt.bufPrint(err_buff[0..], "Handle Err: {any}", .{err}) catch "format error";
+                const formatted_err = std.fmt.bufPrint(err_buff[0..], "{any}", .{err}) catch "format error";
                 const response = ProtoDef.ResponseMessage{ .kind = .{ .error_response = .{ .message = formatted_err } } };
                 response.encode(&usb_writer, allocator) catch {};
             };
