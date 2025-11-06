@@ -23,6 +23,11 @@ const Example = struct {
 // 4) Define Firmware Examples/Targets
 const examples = [_]Example{
     .{
+        .name = "echo_test",
+        .target = .RP2350,
+        .file = "src/echo_test.zig",
+    },
+    .{
         .name = "lw_pico2",
         .target = .RP2350,
         .file = "src/logicweave.zig",
