@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebUSB Echo Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        html, body {
+            height: 100%;
+            font-family: 'Inter', sans-serif;
+        }
+        /* Simple scrollbar styling */
+        pre::-webkit-scrollbar {
+            width: 6px;
+        }
+        pre::-webkit-scrollbar-thumb {
+            background-color: #4B5563; /* gray-600 */
+            border-radius: 3px;
+        }
+        pre::-webkit-scrollbar-track {
+            background-color: #1F2937; /* gray-800 */
+        }
+        /* Custom styles for log messages */
+        .log-sent { color: #34D399; } /* emerald-400 */
+        .log-recv { color: #60A5FA; } /* blue-400 */
+        .log-info { color: #FBBF24; } /* amber-400 */
+        .log-error { color: #F87171; } /* red-400 */
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 flex items-center justify-center h-full">
+    <div class="w-full max-w-2xl mx-auto p-6 bg-gray-800 rounded-lg shadow-xl">
+        <h1 class="text-2xl font-bold text-center text-white mb-4">WebUSB Echo Device</h1>
+        <p class="text-sm text-gray-400 text-center mb-4">For device with VENDOR_ID 0x2E8A, PRODUCT_ID 0x000a</p>
+
+        <!-- Connection Button -->
+        <div class="text-center mb-4">
+            <button id="connect-button" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:opacity-50">
+                Connect to Device
+            </button>
+        </div>
+
+        <!-- Log Area -->
+        <div class="bg-gray-900 rounded-lg p-4 h-64 overflow-y-auto mb-4 border border-gray-700">
+            <pre id="log" class="text-sm whitespace-pre-wrap"></pre>
+        </div>
+
+        <!-- Controls (Hidden by default) -->
+        <div id="controls" class="hidden">
+            <div id="error-message" class="text-red-400 text-center text-sm mb-2 h-5"></div>
+            <div class="flex space-x-2">
+                <input type="text" id="data-input" class="flex-grow bg-gray-700 border border-gray-600 text-gray-200 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Type message (max 63 chars)..." maxlength="63">
+                <button id="send-button" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-5 rounded-lg transition duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50">
+                    Send
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const connectButton = document.getElementById('connect-button');
+        const logArea = document.getElementById('log');
+        const controlsDiv = document.getElementById('controls');
+        const dataInput = document.getElementById('data-input');
+        const sendButton = document.getElementById('send-button');
+        const errorMessage = document.getElementById('error-message');
+
+        const VENDOR_ID = 0x2E8A;
+        const PRODUCT_ID = 0x000a;
+
+        // From your Zig/Python code, we know the endpoint numbers
+        // WebUSB wants the ENDPOINT NUMBER (1, 2, 3), not the address (0x81, 0x02).
+        const EP_ECHO_OUT_NUM = 2; // Host to Device (was 0x02)
+        const EP_ECHO_IN_NUM = 1;  // Device to Host (was 0x81)
+
+        let device = null;
+
+        /**
+         * Appends a message to the log area with appropriate styling.
+         * @param {string} message - The text to log.
+         * @param {string} type - 'sent', 'recv', 'info', or 'error'.
+         */
+        function log(message, type = 'info') {
+            const span = document.createElement('span');
+            span.textContent = `[${type.toUpperCase()}] ${message}\n`;
+            
+            switch(type) {
+                case 'sent': span.className = 'log-sent'; break;
+                case 'recv': span.className = 'log-recv'; break;
+                case 'info': span.className = 'log-info'; break;
+                case 'error': span.className = 'log-error'; break;
+                default: span.className = 'text-gray-400';
+            }
+            
+            logArea.appendChild(span);
+            logArea.scrollTop = logArea.scrollHeight; // Auto-scroll to bottom
+        }
+
+        /**
+         * Handles the connection process.
+         */
+        async function connectDevice() {
+            log('Requesting USB device...');
+            try {
+                device = await navigator.usb.requestDevice({
+                    filters: [{ vendorId: VENDOR_ID, productId: PRODUCT_ID }]
+                });
+
+                log(`Device selected: ${device.manufacturerName} - ${device.productName}`);
+
+                await device.open();
+                log('Device opened.');
+
+                // Select configuration 1
+                await device.selectConfiguration(1);
+                log('Configuration selected.');
+
+                // Claim interface 0
+                await device.claimInterface(0);
+                log('Interface claimed.');
+
+                log('Ready to send/receive data.');
+                connectButton.disabled = true;
+                connectButton.textContent = 'Connected';
+                controlsDiv.classList.remove('hidden');
+
+                // Start the loop to listen for incoming data
+                readLoop();
+
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        /**
+         * Continuously listens for data from the IN endpoint.
+         */
+        async function readLoop() {
+            log('Read loop started.');
+            while (device && device.opened) {
+                try {
+                    // Wait for an IN packet (max 64 bytes)
+                    // FIX: Use the endpoint *number* (1), not the address (0x81)
+                    const result = await device.transferIn(EP_ECHO_IN_NUM, 64);
+
+                    if (result.status === 'ok') {
+                        const dataView = result.data;
+                        if (dataView.byteLength === 0) continue;
+
+                        // Firmware prepends the length as 1 byte
+                        const length = dataView.getUint8(0);
+                        
+                        // Extract the payload (from byte 1 for 'length' bytes)
+                        const payload = new Uint8Array(dataView.buffer, 1, length);
+                        
+                        // Decode the payload as UTF-8 text
+                        const text = new TextDecoder().decode(payload);
+                        
+                        log(text, 'recv');
+
+                    } else if (result.status === 'stall') {
+                        log('Stall received. Clearing halt...', 'warn');
+                        // FIX: Use the endpoint *number* (1), not the address (0x81)
+                        await device.clearHalt('in', EP_ECHO_IN_NUM);
+                    }
+
+                } catch (error) {
+                    if (device && device.opened) {
+                        // Log error only if it's not a known disconnect
+                        log(`Read loop error: ${error.message}`, 'error');
+                        // Wait a bit before retrying to avoid spamming errors
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
+            }
+            log('Read loop stopped.');
+        }
+
+        /**
+         * Sends data to the OUT endpoint.
+         */
+        async function sendData() {
+            if (!device) {
+                log('Device not connected.', 'error');
+                return;
+            }
+
+            const text = dataInput.value;
+            if (text.length === 0) return;
+
+            if (text.length > 63) {
+                errorMessage.textContent = 'Error: Message too long (max 63).';
+                return;
+            }
+            
+            errorMessage.textContent = ''; // Clear error
+
+            try {
+                // Encode the text as UTF-8
+                const data = new TextEncoder().encode(text);
+                
+                // Send the data
+                // FIX: Use the endpoint *number* (2), not the address (0x02)
+                await device.transferOut(EP_ECHO_OUT_NUM, data);
+                
+                log(text, 'sent');
+                dataInput.value = ''; // Clear input field
+
+            } catch (error) {
+                log(`Send error: ${error.message}`, 'error');
+            }
+        }
+
+        /**
+         * Handles device disconnection.
+         */
+        function handleDisconnect(event) {
+            if (device && event.device.serialNumber === device.serialNumber) {
+                log('Device disconnected.', 'error');
+                device = null;
+                connectButton.disabled = false;
+                connectButton.textContent = 'Connect to Device';
+                controlsDiv.classList.add('hidden');
+            }
+        }
+
+        // --- Event Listeners ---
+
+        connectButton.addEventListener('click', connectDevice);
+
+        sendButton.addEventListener('click', sendData);
+
+        // Allow sending data by pressing Enter in the input field
+        dataInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                sendData();
+            }
+            errorMessage.textContent = ''; // Clear error on keypress
+        });
+
+        // Listen for device disconnections
+        navigator.usb.addEventListener('disconnect', handleDisconnect);
+
+        // Initial log message
+        log('Please connect your USB device.');
+
+    </script>
+</body>
+</html>
