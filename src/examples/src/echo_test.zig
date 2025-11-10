@@ -182,13 +182,29 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noretu
     while (true) {}
 }
 
+pub const microzig_options = microzig.Options{
+    .log_level = .debug,
+    .logFn = rp2xxx.uart.log,
+};
+
+const uart = rp2xxx.uart.instance.num(0);
+const uart_tx_pin = gpio.num(12);
+
 pub fn main() !void {
+    uart_tx_pin.set_function(.uart);
+
+    uart.apply(.{
+        .clock_config = rp2xxx.clock_config,
+    });
+
+    rp2xxx.uart.init_logger(uart);
+
     usb_dev.init_clk();
     usb_dev.init_device(&DEVICE_CONFIGURATION) catch unreachable;
 
     while (true) {
         usb_dev.task(
-            false,
+            true,
         ) catch unreachable;
     }
 }

@@ -8,24 +8,6 @@ const utils = microzig.core.usb.utils;
 const bos = utils.BosConfig;
 const DescType = types.DescType;
 
-// --- MS/WebUSB vendor codes and descriptors ---
-const MS_VENDOR_CODE: u8 = 0x20;
-const WEBUSB_VENDOR_CODE: u8 = 0x30;
-const WEBUSB_LANDING_PAGE_INDEX: u8 = 1;
-const winusb_compat_id_descriptor = [_]u8{
-    0x28, 0x00, 0x00, 0x00, // dwLength
-    0x00, 0x01, // bcdVersion 1.0
-    0x04, 0x00, // wIndex = Extended Compat ID Descriptor
-    0x01, // one function
-    0x00, 0x00, 0x00, 0x00, // reserved
-    0x00, // interface number 0
-    0x01, // reserved
-    'W', 'I', 'N', 'U', 'S', 'B', 0, 0, // Compatible ID
-    0, 0, 0, 0, 0, 0, 0, 0, // Sub Compatible ID
-    0, 0, 0, 0, 0, 0, // reserved
-};
-// ---
-
 pub fn LogicWeaveDriver(comptime usb: anytype) type {
     return struct {
         device: ?types.UsbDevice = null,
@@ -125,19 +107,12 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
         /// This is the core logic. Called when data is received (OUT) or sent (IN).
         fn transfer(ptr: *anyopaque, ep_addr: u8, data: []u8) void {
             var self: *@This() = @ptrCast(@alignCast(ptr));
-
+            std.log.info("Starting processing a transfer with ep_addr {d} data len {any}", .{ ep_addr, data.len });
+            defer std.log.info("Finished processing a transfer with ep_addr {d} data len {any}", .{ ep_addr, data.len });
             if (ep_addr == self.ep_out) {
-                // --- PING-PONG ECHO (RECEIVE) ---
-                // Data has arrived. `data` is a slice with the received bytes.
                 self.epout_primed = false; // It's no longer primed, it's been used.
 
-                // --- FIX: Explicitly copy received data ---
-                // This ensures self.echo_buf *definitely* contains
-                // the data, just in case `data` is a temporary slice
-                // or `self.echo_buf` isn't written yet.
                 if (data.len > self.echo_buf.len) {
-                    // This should never happen, but good to guard.
-                    // We can't handle this, just drop it.
                     // Re-prime ep_out and wait for the next packet.
                     if (!self.epout_primed) {
                         self.epout_primed = true;
@@ -155,38 +130,16 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
                 // Send the data *from* self.echo_buf
                 self.device.?.endpoint_transfer(self.ep_in, self.echo_buf[0..self.echo_buf_len]);
             } else if (ep_addr == self.ep_boot) {
-                // This logic is correct
                 rp2xxx.rom.reset_to_usb_boot();
-                // We do NOT re-prime ep_boot, because the device is rebooting.
             } else if (ep_addr == self.ep_in) {
-                // --- PING-PONG ECHO (SEND COMPLETE) ---
-                // The IN transfer (our echo) has completed.
-
-                // 1. Mark the IN endpoint as no longer busy.
+                // IN echo done: free the buffer
                 self.epin_busy = false;
+                self.echo_buf_len = 0;
 
-                // The buffer we just sent is now free.
-                // Note: 'data.len' here is the length of the packet *we just sent*.
-                const sent_len = data.len;
-                self.echo_buf_len = 0; // Mark buffer as "consumed"
-
-                // --- ZLP condition ---
-                if (sent_len > 0 and sent_len == usb.max_packet_size) {
-                    // We just sent a *full* packet.
-                    // We must send a ZLP to terminate the transfer.
-                    self.epin_busy = true;
-                    self.device.?.endpoint_transfer(self.ep_in, &.{});
-                    // The *next* time this transfer handler is called (for the ZLP),
-                    // sent_len will be 0, epin_busy will be set to false,
-                    // and ep_out will be re-primed (if not already).
-                } else {
-                    // We just sent a short packet (or a ZLP), so the transfer is over.
-                    // 2. Now that the echo is done, re-prime ep_out
-                    //    to receive the *next* packet, *if not already primed*.
-                    if (!self.epout_primed and !self.epin_busy) {
-                        self.epout_primed = true;
-                        self.device.?.endpoint_transfer(self.ep_out, &self.echo_buf);
-                    }
+                // No ZLP. Immediately re-arm OUT for next packet.
+                if (!self.epout_primed) {
+                    self.epout_primed = true;
+                    self.device.?.endpoint_transfer(self.ep_out, &self.echo_buf);
                 }
             }
         }
