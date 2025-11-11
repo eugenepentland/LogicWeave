@@ -45,13 +45,16 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
         }
 
         pub fn writer_flush(self: *@This()) void {
+            std.log.info("Writing out data: {any}", .{self.writer.buffer});
             if (self.writer.buffered().len == 0) return;
 
             if (!self.epin_busy) {
                 self.epin_busy = true;
-                self.device.?.endpoint_transfer(self.ep_in, self.writer.buffered());
+                self.writer.buffer[0] = @intCast(self.writer.end - 1);
+                self.device.?.endpoint_transfer(self.ep_in, self.writer.buffer);
                 // Reset the writer buffer
                 self.writer = io.Writer.fixed(&self.writer_buff);
+                self.writer.end = 1;
             }
         }
 
@@ -100,6 +103,7 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
 
             self.reader = io.Reader.fixed(&.{});
             self.writer = io.Writer.fixed(&self.writer_buff);
+            self.writer.end = 1;
 
             self.epin_busy = false;
             self.epout_primed = false;
@@ -130,10 +134,16 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
 
             if (ep_addr == self.ep_out) {
                 self.epout_primed = false; // It's no longer primed, it's been used.
-                self.reader = io.Reader.fixed(data);
+                const slice_len = data[0];
+                std.mem.copyForwards(u8, &self.reader_buff, data[1 .. slice_len + 1]);
+                self.reader = io.Reader.fixed(self.reader_buff[0..slice_len]);
+
+                //self.reader = io.Reader.fixed(data[0..]);
+                std.log.info("Put data into reader: {any}", .{self.reader.buffered()});
             } else if (ep_addr == self.ep_boot) {
                 rp2xxx.rom.reset_to_usb_boot();
             } else if (ep_addr == self.ep_in) {
+                std.log.info("Handling ep_in", .{});
                 // IN transfer (our reply) is complete
                 self.epin_busy = false;
 
@@ -141,7 +151,7 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
                 // to receive the *next* command from the host.
                 if (!self.epout_primed) {
                     self.epout_primed = true;
-                    self.device.?.endpoint_transfer(self.ep_out, &.{});
+                    self.device.?.endpoint_transfer(self.ep_out, self.reader.buffered());
                 }
             }
         }
