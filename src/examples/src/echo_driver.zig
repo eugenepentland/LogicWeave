@@ -107,10 +107,10 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
             // Prime the OUT endpoint to receive data into our reader_buff
             if (!self.epin_busy and !self.epout_primed) {
                 self.epout_primed = true;
-                self.device.?.endpoint_transfer(self.ep_out, &self.reader_buff);
+                self.device.?.endpoint_transfer(self.ep_out, &.{});
             }
 
-            self.device.?.endpoint_transfer(self.ep_boot, &self.boot_buff);
+            self.device.?.endpoint_transfer(self.ep_boot, &.{});
 
             return start_len - curr_cfg.len;
         }
@@ -141,7 +141,7 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
                 // to receive the *next* command from the host.
                 if (!self.epout_primed) {
                     self.epout_primed = true;
-                    self.device.?.endpoint_transfer(self.ep_out, &self.reader_buff);
+                    self.device.?.endpoint_transfer(self.ep_out, &.{});
                 }
             }
         }
