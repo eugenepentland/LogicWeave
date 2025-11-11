@@ -1,14 +1,17 @@
-import serial
+import usb.core
+import usb.util
 import time
 import struct
 # Removed: import LogicWeave.proto_gen.logicweave_pb2 as all_pb2
 from LogicWeave.exceptions import DeviceFirmwareError, DeviceResponseError, DeviceConnectionError
-
-import serial.tools.list_ports
 from typing import Optional, Any
 # Add a type hint for the protobuf module to improve clarity
 ProtobufModule = Any 
 
+VENDOR_ID = 0x2E8A
+PRODUCT_ID = 0x000a
+INTERFACE_NUM = 0
+PACKET_SIZE = 64 # Must match the fixed size in your protocol
 
 # --- Base Class for Peripherals ---
 class _BasePeripheral:
@@ -205,33 +208,75 @@ class SPI(_BasePeripheral):
         return " ".join(parts) + ">"
 
 
-def _get_device_port():
-    """Finds the serial port for the LogicWeave device by VID/PID."""
-    vid, pid = 0x1E8B, 0x0001
-    ports = serial.tools.list_ports.comports()
-    for port in ports:
-        if port.vid == vid and port.pid == pid and port.interface == "LogicWeave Driver":
-            return port.device
-    return None
+def _find_usb_device(vendor_id: int, product_id: int) -> Optional[usb.core.Device]:
+    """Finds the LogicWeave device by VID/PID."""
+    # Find our device
+    dev = usb.core.find(idVendor=vendor_id, idProduct=product_id)
+    return dev
 
 
 # --- Main Controller Class ---
 class LogicWeave:
-    """A high-level wrapper for communicating with the LogicWeave device over serial."""
-    def __init__(self, protobuf_module: ProtobufModule, port: Optional[str] = None, baudrate=115200, timeout=1, write_delay=0, **kwargs):
-        # 🌟 Store the user-provided protobuf module
+    """A high-level wrapper for communicating with the LogicWeave device over a custom USB vendor interface."""
+    def __init__(self, protobuf_module: ProtobufModule, 
+                 vendor_id: int = VENDOR_ID, product_id: int = PRODUCT_ID, 
+                 interface: int = INTERFACE_NUM, packet_size: int = PACKET_SIZE, 
+                 timeout_ms: int = 5000, **kwargs):
+        
         self.pb = protobuf_module
-        self.write_delay = write_delay
+        self.vendor_id = vendor_id
+        self.product_id = product_id
+        self.interface = interface
+        self.packet_size = packet_size
+        self.timeout_ms = timeout_ms
+        self.dev: Optional[usb.core.Device] = None
+        self.ep_out: Optional[usb.core.Endpoint] = None
+        self.ep_in: Optional[usb.core.Endpoint] = None
+        self.kernel_driver_detached = False
+
+        self._setup_usb_connection()
+
+    def _setup_usb_connection(self):
+        """Initializes the USB connection using pyusb."""
+        print(f"--- Attempting to connect to USB device (VID:{hex(self.vendor_id)}, PID:{hex(self.product_id)}) ---")
         
-        if not port:
-            port = _get_device_port()
-            if not port:
-                raise DeviceConnectionError("Could not auto-detect device. Please specify a serial port.")
-        
+        # 1. Find the device
+        self.dev = _find_usb_device(self.vendor_id, self.product_id)
+
+        if self.dev is None:
+            raise DeviceConnectionError(f"Device not found. Is it plugged in and enumerated?")
+
+        print(f"✅ Found device: {self.dev.product} by {self.dev.manufacturer}")
+
         try:
-            self.ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout, **kwargs)
-        except serial.SerialException as e:
-            raise DeviceConnectionError(f"Failed to connect to {port}: {e}") from e
+            # 2. Detach kernel driver if active
+            if self.dev.is_kernel_driver_active(self.interface):
+                print("    Detaching kernel driver...")
+                self.dev.detach_kernel_driver(self.interface)
+                self.kernel_driver_detached = True
+
+            # 3. Set configuration and get interface
+            self.dev.set_configuration()
+            cfg = self.dev.get_active_configuration()
+            intf = cfg[(self.interface, 0)]
+
+            # 4. Find IN and OUT endpoints
+            self.ep_out = usb.util.find_descriptor(
+                intf, custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT
+            )
+            self.ep_in = usb.util.find_descriptor(
+                intf, custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN
+            )
+
+            if self.ep_out is None or self.ep_in is None:
+                self.dev = None
+                raise DeviceConnectionError("Could not find IN and OUT endpoints.")
+            
+            print(f"    EP OUT: {hex(self.ep_out.bEndpointAddress)}, EP IN: {hex(self.ep_in.bEndpointAddress)}")
+
+        except usb.core.USBError as e:
+            self.dev = None # Ensure cleanup runs cleanly if an error occurs here
+            raise DeviceConnectionError(f"USB Setup Error: {e}") from e
 
     # --- Peripheral Factory Methods ---
     def uart(self, instance_num: int, tx_pin: int, rx_pin: int, baud_rate: int = 115200, name: str = "uart") -> 'UART':
@@ -246,11 +291,18 @@ class LogicWeave:
     def spi(self, instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int, baud_rate: int = 1000000, default_cs_pin: Optional[int] = None, name: str = "spi") -> SPI:
         return SPI(self, instance_num, sclk_pin, mosi_pin, miso_pin, baud_rate, default_cs_pin, name)
 
-    # --- Core Communication Logic ---
+# --- Core Communication Logic (Modified for USB) ---
     def _execute_transaction(self, specific_message_payload):
-        # Now uses self.pb
+        """
+        Sends the protobuf request over USB as a 64-byte framed packet 
+        and receives the 64-byte echoed response.
+        """
+        if self.dev is None or self.ep_out is None or self.ep_in is None:
+            raise DeviceConnectionError("USB connection is not established.")
+
         app_message = self.pb.RequestMessage()
         
+        # Determine the oneof field name for the message (Unchanged from serial version)
         field_name = None
         for field in app_message.DESCRIPTOR.fields:
             if field.containing_oneof and field.message_type == specific_message_payload.DESCRIPTOR:
@@ -258,44 +310,59 @@ class LogicWeave:
                 break
         
         if not field_name:
-            # This check is crucial for handling custom messages the user adds.
-            raise ValueError(f"Could not find a field in AppMessage for message type: {type(specific_message_payload).__name__}. "
-                             f"Did you forget to add this message type to the 'kind' oneof in your .proto file?")
+            raise ValueError(f"Could not find a field in RequestMessage for message type: {type(specific_message_payload).__name__}.")
         
         getattr(app_message, field_name).CopyFrom(specific_message_payload)
         
         request_bytes = app_message.SerializeToString()
         length = len(request_bytes)
-        if length > 256:
-            raise ValueError(f"Message too large for 1-byte prefix: {length} bytes.")
-
-        length_prefix = struct.pack(">B", length)
         
-        if not self.ser or not self.ser.is_open:
-            raise DeviceConnectionError("Serial port is not open.")
-
-        # Write request
-        self.ser.reset_input_buffer()
-        self.ser.write(length_prefix + request_bytes)
-        if self.write_delay > 0:
-            time.sleep(self.write_delay)
-
-        # Read response length
-        response_length_byte = self.ser.read(1)
-        if not response_length_byte:
-            # Timeout occurred - Now returns an empty AppMessage from the injected module
-            return self.pb.ResponseMessage() 
-
-        response_length = response_length_byte[0]
+        # --- 1. SENDING (Fixed 64-byte Packet) ---
+        MAX_PAYLOAD_SIZE = self.packet_size - 1 # 63 bytes
         
-        # Read response body
-        response_bytes = self.ser.read(response_length)
-        if len(response_bytes) != response_length:
-            raise DeviceResponseError(f"Incomplete response. Expected {response_length}, got {len(response_bytes)}.")
+        if length > MAX_PAYLOAD_SIZE:
+            raise ValueError(f"Message too large for {self.packet_size}-byte packet: {length} bytes. Max payload is {MAX_PAYLOAD_SIZE} bytes.")
 
+        # 1. Length prefix (1 byte, little endian is implicit for simple byte, but struct pack ensures 1 byte)
+        length_prefix = struct.pack("B", length) 
+        
+        # 2. Data payload: request_bytes
+        
+        # 3. Calculate and create padding (zeros)
+        padding_needed = self.packet_size - (1 + length)
+        padding = b'\x00' * padding_needed
+        
+        # 4. Build the final 64-byte packet
+        packet_to_send = length_prefix + request_bytes + padding
+
+        try:
+            # Send the fixed-size packet over the OUT endpoint
+            # The pyusb example uses ep_out.write, which handles the transfer.
+            self.ep_out.write(packet_to_send)
+
+            # --- 2. RECEIVING (Fixed 64-byte Packet) ---
+            # Read the entire fixed-size packet (64 bytes) from the IN endpoint
+            full_response_packet = self.ep_in.read(self.packet_size, timeout=self.timeout_ms)
+            full_response_packet_bytes = bytes(full_response_packet)
+            
+        except usb.core.USBError as e:
+            raise DeviceResponseError(f"USB Transfer Error: {e}") from e
+        
+        if len(full_response_packet_bytes) != self.packet_size:
+            if len(full_response_packet_bytes) == 0:
+                # Timeout occurred
+                return self.pb.ResponseMessage() 
+            else:
+                raise DeviceResponseError(f"Incomplete USB response. Expected {self.packet_size} bytes, got {len(full_response_packet_bytes)}.")
+
+        # Read response length from the first byte
+        response_length = full_response_packet_bytes[0]
+        
+        # Extract the actual payload bytes using the length prefix
+        response_bytes = full_response_packet_bytes[1 : 1 + response_length]
+        
         # Parse response
         try:
-            # Now uses self.pb
             parsed_response = self.pb.ResponseMessage()
             parsed_response.ParseFromString(response_bytes)
             return parsed_response
@@ -303,33 +370,33 @@ class LogicWeave:
             raise DeviceFirmwareError(f"Client-side parse error: {e}. Raw data: {response_bytes.hex()}")
 
     def _send_and_parse(self, request_payload, expected_response_field: str):
-        """Sends a request and parses the expected response, simplifying error handling."""
         response_app_msg = self._execute_transaction(request_payload)
         response_field = response_app_msg.WhichOneof("kind")
         if response_field == "error_response":
-            raise DeviceFirmwareError(f"Device error: {response_app_msg.error_response.message}")
-
-        # --- Handle expected empty responses dynamically ---
-        if response_field is None:
-            try:
-                # Now uses self.pb
-                field_descriptor = self.pb.ResponseMessage.DESCRIPTOR.fields_by_name[expected_response_field]
-                is_truly_empty = len(field_descriptor.message_type.fields) == 0
-                
-                if is_truly_empty:
-                    # Now uses self.pb
-                    return self.pb.Empty()
-            except KeyError:
-                pass 
-
+             raise DeviceFirmwareError(f"Device error: {response_app_msg.error_response.message}")
         if response_field != expected_response_field:
-            raise DeviceResponseError(expected=expected_response_field, received=response_field)
-
+             raise DeviceResponseError(expected=expected_response_field, received=response_field)
         return getattr(response_app_msg, response_field)
 
     def close(self):
-        if self.ser and self.ser.is_open:
-            self.ser.close()
+        """Cleans up the USB connection and re-attaches the kernel driver if necessary."""
+        print("\nCleaning up USB connection...")
+        if self.dev is not None:
+            try:
+                # Release the interface
+                usb.util.release_interface(self.dev, self.interface)
+            except usb.core.USBError:
+                pass 
+
+            if self.kernel_driver_detached:
+                print("Re-attaching kernel driver.")
+                try:
+                    self.dev.attach_kernel_driver(self.interface)
+                except usb.core.USBError:
+                    pass
+
+            usb.util.dispose_resources(self.dev)
+        print("Cleanup complete.")
 
     def __enter__(self):
         return self

@@ -1,127 +1,177 @@
-// usb_config.zig
+const std = @import("std");
 const microzig = @import("microzig");
+const LogicWeaveDriver = @import("logicweave_driver.zig").LogicWeaveDriver;
+
 const rp2xxx = microzig.hal;
+const flash = rp2xxx.flash;
+const time = rp2xxx.time;
+const gpio = rp2xxx.gpio;
 const usb = rp2xxx.usb;
+const types = rp2xxx.usb.types; // 1. Import types
 
-// --- User Configuration ---
-// All device-specific values are grouped here for easy modification.
-
-const VENDOR_ID: u16 = 0x1E8B;
-const PRODUCT_ID: u16 = 0x0001;
-const DEVICE_VERSION: u16 = 0x0100; // e.g., 1.0.0
-
-const USB_VERSION: u16 = 0x0200; // USB 2.0
-const MAX_POWER_MA: u9 = 100; // Max power draw in mA
-const CONFIG_ATTRIBUTES: u8 = 0xC0; // Self-powered, no remote wakeup
-
-// IAD (Interface Association Descriptor) device class for a composite device like CDC
-const DEVICE_CLASS_IAD = 0xEF;
-const DEVICE_SUBCLASS_IAD = 2;
-const DEVICE_PROTOCOL_IAD = 1;
-
-// String descriptors are 1-indexed by the host. Index 0 is the Language ID.
-// This enum maps logical names to their 1-based index.
-const StringIndex = enum(u8) {
-    Manufacturer = 1,
-    Product = 2,
-    Serial = 3,
-    Cdc0Interface = 4,
-    Cdc1Interface = 5,
-};
-
-// --- Endpoint Configuration ---
-const MAX_PACKET_SIZE_0: u8 = 64;
-const CDC_EP_NOTIFICATION_SIZE: u16 = 8;
-const CDC_EP_DATA_SIZE: u16 = 64;
-
-// --- CDC 0 Configuration ---
-// These values are taken directly from the C example
-const CDC1_INTERFACE_NUM: u8 = 0;
-const CDC1_EP_NOTIFICATION_ADDR: u8 = 0x81; // EP 1 IN
-const CDC1_EP_DATA_OUT_ADDR: u8 = 0x01; // EP 1 OUT
-const CDC1_EP_DATA_IN_ADDR: u8 = 0x82; // EP 2 IN
-
-// --- CDC 1 Configuration ---
-// These values are taken directly from the C example
-const CDC0_INTERFACE_NUM: u8 = 2; // CDC 0 uses 0 & 1
-const CDC0_EP_NOTIFICATION_ADDR: u8 = 0x83; // EP 3 IN
-const CDC0_EP_DATA_OUT_ADDR: u8 = 0x03; // EP 3 OUT
-const CDC0_EP_DATA_IN_ADDR: u8 = 0x84; // EP 4 IN
-
-// --- End User Configuration ---
-
-// USB peripheral instance
 const usb_dev = rp2xxx.usb.Usb(.{});
 
-// --- String Descriptors ---
-const LANG_DESCRIPTOR = "\x04\x03\x09\x04"; // U.S. English
-const ALL_DESCRIPTOR_STRINGS = &.{
-    &usb.utils.utf8_to_utf16_le("LogicWeave"), // Index 1
-    &usb.utils.utf8_to_utf16_le("LogicWeaveCore"), // Index 2
-    &usb.utils.utf8_to_utf16_le("someserial"), // Index 3
-    &usb.utils.utf8_to_utf16_le("LogicWeave Driver"), // Index 4 (CDC 0)
-    &usb.utils.utf8_to_utf16_le("LogicWeave WebUI"), // Index 5 (CDC 1)
+const ep_echo_in_addr = usb.Endpoint.to_address(1, .In);
+const ep_echo_out_addr = usb.Endpoint.to_address(2, .Out);
+const ep_boot_addr = usb.Endpoint.to_address(3, .Out);
+const ep_size = 64;
+
+const interface_desc_len = 9;
+const endpoint_desc_len = 7;
+
+const usb_config_len = usb.templates.config_descriptor_len + interface_desc_len + (3 * endpoint_desc_len);
+
+const MS_VENDOR_CODE: u8 = 0x20; // Arbitrary non-zero vendor request code
+
+const msft_string_descriptor = [_]u8{ 18, 0x03, 'M', 0, 'S', 0, 'F', 0, 'T', 0, '1', 0, '0', 0, '0', 0, MS_VENDOR_CODE, 0x00 };
+
+const winusb_compat_id_descriptor = [_]u8{
+    0x28, 0x00, 0x00, 0x00, // dwLength
+    0x00, 0x01, // bcdVersion 1.0
+    0x04, 0x00, // wIndex = Extended Compat ID Descriptor
+    0x01, // one function
+    0x00, 0x00, 0x00, 0x00, // reserved
+    0x00, // interface number
+    0x01, // reserved
+    'W', 'I', 'N', 'U', 'S', 'B', 0, 0, // Compatible ID
+    0, 0, 0, 0, 0, 0, 0, 0, // Sub-Compatible ID
+    0, 0, 0, 0, 0, 0, // reserved
 };
 
-// --- Combined Configuration Descriptor ---
-const usb_config_len = usb.templates.config_descriptor_len + (2 * usb.templates.cdc_descriptor_len);
+const id1 = // --- Manually defined Interface Descriptor (9 bytes) ---
+    &types.InterfaceDescriptor{ // <--- FIXED (added &)
+        .interface_number = 0,
+        .alternate_setting = 0,
+        .num_endpoints = 3, // We now have 3 endpoints
+        .interface_class = 0xFF, // Vendor
+        .interface_subclass = 0, // <--- FIXED (field name)
+        .interface_protocol = 0, // <--- FIXED (field name)
+        .interface_s = 0,
+    };
 
+const ed1 = // --- Manually defined Endpoint 1 (Echo IN) (7 bytes) ---
+    &types.EndpointDescriptor{ // <--- FIXED (added &)
+        .endpoint_address = ep_echo_in_addr,
+        .attributes = @intFromEnum(types.TransferType.Bulk),
+        .max_packet_size = ep_size,
+        .interval = 0,
+    };
+
+const ed2 = // --- Manually defined Endpoint 2 (Echo OUT) (7 bytes) ---
+    &types.EndpointDescriptor{ // <--- FIXED (added &)
+        .endpoint_address = ep_echo_out_addr,
+        .attributes = @intFromEnum(types.TransferType.Bulk),
+        .max_packet_size = ep_size,
+        .interval = 0,
+    };
+
+// UUID for WebUSB
+const WEBUSB_GUID = [_]u8{
+    0x38, 0xB6, 0x08, 0x34, 0xA9, 0x09, 0xA0, 0x47,
+    0x8B, 0xFD, 0xA0, 0x76, 0x88, 0x15, 0xB6, 0x65,
+};
+
+const WEBUSB_VENDOR_CODE: u8 = 0x30; // Match the vendor driver
+const WEBUSB_LANDING_PAGE_INDEX: u8 = 1;
+
+// WebUSB platform capability descriptor
+const webusb_platform_capability_descriptor = [_]u8{
+    0x18, // bLength
+    0x10, // bDescriptorType = DEVICE CAPABILITY
+    0x05, // bDevCapabilityType = PLATFORM
+    0x00, // bReserved
+    // PlatformCapabilityUUID (16 bytes)
+    WEBUSB_GUID[0],
+    WEBUSB_GUID[1],
+    WEBUSB_GUID[2],
+    WEBUSB_GUID[3],
+    WEBUSB_GUID[4],
+    WEBUSB_GUID[5],
+    WEBUSB_GUID[6],
+    WEBUSB_GUID[7],
+    WEBUSB_GUID[8],
+    WEBUSB_GUID[9],
+    WEBUSB_GUID[10],
+    WEBUSB_GUID[11],
+    WEBUSB_GUID[12],
+    WEBUSB_GUID[13],
+    WEBUSB_GUID[14],
+    WEBUSB_GUID[15],
+    0x00, 0x01, // bcdVersion 1.0
+    WEBUSB_VENDOR_CODE, // bVendorCode (MUST match your driver's check)
+    WEBUSB_LANDING_PAGE_INDEX, // iLandingPage (index of the URL)
+};
+
+const full_bos_descriptor = [_]u8{
+    // 1. BOS Descriptor Header (5 bytes)
+    0x05, // bLength
+    0x0F, // bDescriptorType = BOS
+    (5 + 24), 0x00, // wTotalLength (5 + 24 = 29 bytes) <-- **CHECK THIS VALUE**
+    0x01, // bNumDeviceCaps
+    // 2. WebUSB Platform Capability Descriptor (24 bytes)
+} ++ webusb_platform_capability_descriptor;
+
+const ed3 = // --- Manually defined Endpoint 3 (Boot OUT) (7 bytes) ---
+    &types.EndpointDescriptor{ // <--- FIXED (added &)
+        .endpoint_address = ep_boot_addr,
+        .attributes = @intFromEnum(types.TransferType.Bulk),
+        .max_packet_size = ep_size,
+        .interval = 0,
+    };
+
+// 3. (FIX) Corrected field names 'interface_subclass' and 'interface_protocol'
 const usb_config_descriptor =
-    // 1. Main Configuration Descriptor
     usb.templates.config_descriptor(
-        1, // bConfigurationValue
-        4, // bNumInterfaces (2 for each CDC device)
-        0, // iConfiguration (0 = no string)
-        usb_config_len, // wTotalLength
-        CONFIG_ATTRIBUTES, // bmAttributes
-        MAX_POWER_MA, // bMaxPower
-    ) ++
-    // 2. CDC 0 (Serial) Descriptors
-    usb.templates.cdc_descriptor(
-        CDC0_INTERFACE_NUM, // bFirstInterface
-        @intFromEnum(StringIndex.Cdc0Interface), // iInterface
-        CDC0_EP_NOTIFICATION_ADDR, // Notification EP Address
-        CDC_EP_NOTIFICATION_SIZE, // Notification EP Size
-        CDC0_EP_DATA_OUT_ADDR, // Data EP OUT Address
-        CDC0_EP_DATA_IN_ADDR, // Data EP IN Address
-        CDC_EP_DATA_SIZE, // Data EP Size
-    ) ++
-    // 3. CDC 1 (Serial) Descriptors
-    usb.templates.cdc_descriptor(
-        CDC1_INTERFACE_NUM, // bFirstInterface
-        @intFromEnum(StringIndex.Cdc1Interface), // iInterface
-        CDC1_EP_NOTIFICATION_ADDR, // Notification EP Address
-        CDC_EP_NOTIFICATION_SIZE, // Notification EP Size
-        CDC1_EP_DATA_OUT_ADDR, // Data EP OUT Address
-        CDC1_EP_DATA_IN_ADDR, // Data EP IN Address
-        CDC_EP_DATA_SIZE, // Data EP Size
-    );
+        1, // config index
+        1, // number of interfaces
+        0, // string index
+        usb_config_len,
+        0xc0, // attributes (self-powered)
+        100, // max power (100 * 2mA = 200mA)
+    ) ++ id1.serialize() ++
+    ed1.serialize() ++
+    ed2.serialize() ++
+    ed3.serialize(); // <--- Semicolon on the last one
 
-// --- USB Drivers ---
-pub var cdc0_driver: usb.cdc.CdcClassDriver(usb_dev) = .{};
-pub var cdc1_driver: usb.cdc.CdcClassDriver(usb_dev) = .{};
+pub var lw_driver: LogicWeaveDriver(usb_dev) = .{};
+var drivers = [_]usb.types.UsbClassDriver{lw_driver.driver()};
 
-var drivers = [_]usb.types.UsbClassDriver{ cdc0_driver.driver(), cdc1_driver.driver() };
+const WEBUSB_URL = "webusb.eugenepentland.dev/";
 
-// --- Top-Level Device Configuration ---
+const webusb_url_descriptor = &[_]u8{
+    @as(u8, WEBUSB_URL.len + 3), // bLength
+    0x03, // URL descriptor
+    0x01, // https://
+} ++ WEBUSB_URL;
+
 pub var DEVICE_CONFIGURATION: usb.DeviceConfiguration = .{
     .device_descriptor = &.{
         .descriptor_type = usb.DescType.Device,
-        .bcd_usb = USB_VERSION,
-        .device_class = DEVICE_CLASS_IAD,
-        .device_subclass = DEVICE_SUBCLASS_IAD,
-        .device_protocol = DEVICE_PROTOCOL_IAD,
-        .max_packet_size0 = MAX_PACKET_SIZE_0,
-        .vendor = VENDOR_ID,
-        .product = PRODUCT_ID,
-        .bcd_device = DEVICE_VERSION,
-        .manufacturer_s = @intFromEnum(StringIndex.Manufacturer),
-        .product_s = @intFromEnum(StringIndex.Product),
-        .serial_s = @intFromEnum(StringIndex.Serial),
+        .bcd_usb = 0x0210, // USB 2.1 device
+        .device_class = 0xFF, // 0xFF = Vendor Specific
+        .device_subclass = 0x00,
+        .device_protocol = 0x00,
+        .max_packet_size0 = 64,
+        .vendor = 0x2E8A, // Raspberry Pi
+        .product = 0x000a, // Pico SDK example
+        .bcd_device = 0x0100,
+        .manufacturer_s = 1,
+        .product_s = 2,
+        .serial_s = 0,
         .num_configurations = 1,
     },
+    .bos_descriptor = &full_bos_descriptor,
     .config_descriptor = &usb_config_descriptor,
-    .lang_descriptor = LANG_DESCRIPTOR,
-    .descriptor_strings = ALL_DESCRIPTOR_STRINGS,
+    .webusb_vendor_code = WEBUSB_VENDOR_CODE, // 0x30
+    .webusb_landing_page_index = WEBUSB_LANDING_PAGE_INDEX, // 1
+    .webusb_url_descriptor = webusb_url_descriptor,
+    .lang_descriptor = "\x04\x03\x09\x04",
+    .descriptor_strings = &.{
+        &usb.utils.utf8_to_utf16_le("LogicWeave"),
+        &usb.utils.utf8_to_utf16_le("LogicWeave Core"),
+        &usb.utils.utf8_to_utf16_le("123456"),
+        &usb.utils.utf8_to_utf16_le("Board"),
+        &msft_string_descriptor,
+    },
     .drivers = &drivers,
 };

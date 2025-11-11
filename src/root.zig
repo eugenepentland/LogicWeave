@@ -51,30 +51,9 @@ pub fn init(comptime ProtoDefType: anytype) type {
         };
 
         fn usb_write(driver_enum: cdc_driver, buff: []const u8) void {
-            var driver = if (driver_enum == .driver) usb_cfg.cdc0_driver else usb_cfg.cdc1_driver;
-            var write_buff = buff;
-
-            const msg_lenth: u8 = @intCast(write_buff.len);
-            _ = driver.write(&[_]u8{msg_lenth});
-
-            while (write_buff.len > 0) {
-                write_buff = driver.write(write_buff);
-            }
-            _ = driver.write_flush();
-        }
-
-        fn usb_read() []const u8 {
-            var total_read: usize = 0;
-            var read_buff: []u8 = usb_rx_buff[0..];
-
-            // Read in usb data through the main driver
-            while (true) {
-                const len = usb_cfg.cdc0_driver.read(read_buff);
-                read_buff = read_buff[len..];
-                total_read += len;
-                if (len == 0) break;
-            }
-            return usb_rx_buff[0..total_read];
+            var driver = if (driver_enum == .driver) usb_cfg.lw_driver else return;
+            driver.write(buff) catch {};
+            _ = driver.writer_flush();
         }
 
         fn enable_fpu() void {
@@ -139,19 +118,20 @@ pub fn init(comptime ProtoDefType: anytype) type {
 
         fn handleUsbRx() void {
             // Read in any USB data if there is any
-            const rx_data = usb_read();
-            if (rx_data.len > 0) {
-                if (rx_data.len == 2 and rx_data[1] == 1) rp2xxx.rom.reset_to_usb_boot();
+            const rx_data = usb_cfg.lw_driver.read();
 
+            if (rx_data.len > 0) {
+                std.log.info("Reading in data: {any}", .{rx_data});
+                defer usb_cfg.lw_driver.reader_reset();
                 // Copy the data to the shared memory
                 rx_spinlock.lock();
-                std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data[1..]); //Ignore the first byte, its a length prefix
+                std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data);
                 // Write the request to the webui
-                usb_write(.webui, rx_data[1..]);
+                usb_write(.webui, rx_data);
                 rx_spinlock.unlock();
 
                 // Signal to core1 data is ready and what its length it
-                rp2xxx.multicore.fifo.write_blocking(@intCast(rx_data.len - 1));
+                rp2xxx.multicore.fifo.write_blocking(@intCast(rx_data.len));
             }
         }
 
@@ -159,8 +139,6 @@ pub fn init(comptime ProtoDefType: anytype) type {
             // Writes a response to the fifo if it gets any
             if (rp2xxx.multicore.fifo.read()) |len| {
                 tx_spinlock.lock();
-                if (len == 1) rp2xxx.rom.reset_to_usb_boot();
-
                 defer tx_spinlock.unlock();
                 usb_write(.driver, shared_usb_tx_buff[0..len]);
                 usb_write(.webui, shared_usb_tx_buff[0..len]);

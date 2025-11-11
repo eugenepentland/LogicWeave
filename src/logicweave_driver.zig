@@ -53,6 +53,7 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
                 self.writer.buffer[0] = @intCast(self.writer.end - 1);
                 self.device.?.endpoint_transfer(self.ep_in, self.writer.buffer);
                 // Reset the writer buffer
+                @memset(&self.writer_buff, 0x00);
                 self.writer = io.Writer.fixed(&self.writer_buff);
                 self.writer.end = 1;
             }
