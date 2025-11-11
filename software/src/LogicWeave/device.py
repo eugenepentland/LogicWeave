@@ -4,6 +4,7 @@ import time
 import struct
 # Removed: import LogicWeave.proto_gen.logicweave_pb2 as all_pb2
 from LogicWeave.exceptions import DeviceFirmwareError, DeviceResponseError, DeviceConnectionError
+import LogicWeave.proto_gen.logicweave_pb2 as lw_pb2
 from typing import Optional, Any
 # Add a type hint for the protobuf module to improve clarity
 ProtobufModule = Any 
@@ -218,7 +219,7 @@ def _find_usb_device(vendor_id: int, product_id: int) -> Optional[usb.core.Devic
 # --- Main Controller Class ---
 class LogicWeave:
     """A high-level wrapper for communicating with the LogicWeave device over a custom USB vendor interface."""
-    def __init__(self, protobuf_module: ProtobufModule, 
+    def __init__(self, protobuf_module: ProtobufModule = lw_pb2, 
                  vendor_id: int = VENDOR_ID, product_id: int = PRODUCT_ID, 
                  interface: int = INTERFACE_NUM, packet_size: int = PACKET_SIZE, 
                  timeout_ms: int = 5000, **kwargs):
@@ -289,7 +290,7 @@ class LogicWeave:
         return I2C(self, instance_num, sda_pin, scl_pin, name)
 
     def spi(self, instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int, baud_rate: int = 1000000, default_cs_pin: Optional[int] = None, name: str = "spi") -> SPI:
-        return SPI(self, instance_num, sclk_pin, mosi_pin, miso_pin, baud_rate, default_cs_pin, name)
+        return SPI(self, instance_num, sclk_pin, mosi_pin, miso_pin, baud_rate, name, default_cs_pin)
 
 # --- Core Communication Logic (Modified for USB) ---
     def _execute_transaction(self, specific_message_payload):

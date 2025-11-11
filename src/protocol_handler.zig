@@ -111,8 +111,8 @@ fn process_request(allocator: std.mem.Allocator, ProtoDef: type, message: ProtoD
         switch (kind_enum) {
             .firmware_info_request => |_| {
                 const id_array = try getUniqueBoardId();
-                var id_buff: [17]u8 = undefined;
-                picoGetUniqueBoardIdString(&id_buff, id_array);
+                var id_buff: []u8 = try allocator.alloc(u8, 17);
+                picoGetUniqueBoardIdString(id_buff, id_array);
                 // Response created and encoded as requested (was already this way)
                 return .{ .firmware_info_response = .{
                     .hash = firmware_config.GIT_HASH,
