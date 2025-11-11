@@ -1,6 +1,7 @@
 const std = @import("std");
+const io = std.io; // --- NEW: Alias for std.io
 const microzig = @import("microzig");
-const rp2xxx = @import("microzig").hal; // Changed for consistency
+const rp2xxx = @import("microzig").hal;
 
 const types = microzig.core.usb.types;
 const utils = microzig.core.usb.utils;
@@ -14,22 +15,48 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
         ep_in: u8 = 0,
         ep_out: u8 = 0,
         ep_boot: u8 = 0,
-        // This buffer for the boot endpoint is correct.
         boot_buff: [1]u8 = undefined,
 
-        // --- Simple "ping-pong" echo buffer ---
-        echo_buf: [usb.max_packet_size]u8 = undefined,
+        reader_buff: [usb.max_packet_size]u8 = undefined,
+        writer_buff: [usb.max_packet_size]u8 = undefined,
 
-        // Flag to track if an IN transfer is in progress
+        // --- CHANGED: Correct type and initialized to undefined ---
+        reader: io.Reader = undefined,
+        writer: io.Writer = undefined,
+
         epin_busy: bool = false,
-
-        // --- FIX: Explicit flag to prevent double-priming ep_out ---
         epout_primed: bool = false,
 
         /// Called by the USB stack during device initialization
         fn init(ptr: *anyopaque, device: types.UsbDevice) void {
             var self: *@This() = @ptrCast(@alignCast(ptr));
             self.device = device;
+        }
+
+        // --- NEW: Public API functions ---
+
+        pub fn write(self: *@This(), data: []const u8) !void {
+            _ = try self.writer.writeAll(data);
+        }
+
+        pub fn read(self: *@This()) []const u8 {
+            // Returns the unread portion of the reader_buff
+            return self.reader.buffered();
+        }
+
+        pub fn writer_flush(self: *@This()) void {
+            if (self.writer.buffered().len == 0) return;
+
+            if (!self.epin_busy) {
+                self.epin_busy = true;
+                self.device.?.endpoint_transfer(self.ep_in, self.writer.buffered());
+                // Reset the writer buffer
+                self.writer = io.Writer.fixed(&self.writer_buff);
+            }
+        }
+
+        pub fn reader_reset(self: *@This()) void {
+            self.reader = io.Reader.fixed(&.{});
         }
 
         /// Called by the USB stack when the host sets the configuration.
@@ -62,8 +89,6 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
                         }
                     },
                 }
-
-                // This call resets the endpoint, which is good.
                 self.device.?.endpoint_open(curr_cfg[0..desc_ep.length]);
                 endpoints_found += 1;
                 curr_cfg = bos.get_desc_next(curr_cfg);
@@ -73,19 +98,18 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
                 return error.UsbDriverError;
             }
 
-            // Reset buffer states
-            self.epin_busy = false;
-            self.epout_primed = false; // Reset our new flag
+            self.reader = io.Reader.fixed(&.{});
+            self.writer = io.Writer.fixed(&self.writer_buff);
 
-            // Prime the OUT endpoint *only if* the IN endpoint isn't
-            // (somehow) busy. This is the "kickstart" for the ping-pong.
+            self.epin_busy = false;
+            self.epout_primed = false;
+
+            // Prime the OUT endpoint to receive data into our reader_buff
             if (!self.epin_busy and !self.epout_primed) {
-                // Tell the stack: "When data arrives on ep_out,
-                self.epout_primed = true; // Mark as primed
-                self.device.?.endpoint_transfer(self.ep_out, &self.echo_buf);
+                self.epout_primed = true;
+                self.device.?.endpoint_transfer(self.ep_out, &self.reader_buff);
             }
 
-            // Prime ep_boot with its OWN dedicated buffer (This is correct)
             self.device.?.endpoint_transfer(self.ep_boot, &self.boot_buff);
 
             return start_len - curr_cfg.len;
@@ -97,41 +121,27 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
             _: types.ControlStage,
             _: *const types.SetupPacket,
         ) bool {
-            // We don't need to handle any vendor requests for a simple echo
             return true;
         }
 
         /// This is the core logic. Called when data is received (OUT) or sent (IN).
         fn transfer(ptr: *anyopaque, ep_addr: u8, data: []u8) void {
             var self: *@This() = @ptrCast(@alignCast(ptr));
+
             if (ep_addr == self.ep_out) {
                 self.epout_primed = false; // It's no longer primed, it's been used.
-
-                if (data.len > self.echo_buf.len) {
-                    // Re-prime ep_out and wait for the next packet.
-                    if (!self.epout_primed) {
-                        self.epout_primed = true;
-                        self.device.?.endpoint_transfer(self.ep_out, &self.echo_buf);
-                    }
-                    return;
-                }
-
-                // Copy the received data from the 'data' slice into our
-                std.mem.copyForwards(u8, self.echo_buf[0..data.len], data);
-                self.epin_busy = true;
-
-                // Send the data *from* self.echo_buf
-                self.device.?.endpoint_transfer(self.ep_in, self.echo_buf[0..data.len]);
+                self.reader = io.Reader.fixed(data);
             } else if (ep_addr == self.ep_boot) {
                 rp2xxx.rom.reset_to_usb_boot();
             } else if (ep_addr == self.ep_in) {
-                // IN echo done: free the buffer
+                // IN transfer (our reply) is complete
                 self.epin_busy = false;
 
-                // No ZLP. Immediately re-arm OUT for next packet.
+                // Now that we've sent our reply, we can re-arm the OUT endpoint
+                // to receive the *next* command from the host.
                 if (!self.epout_primed) {
                     self.epout_primed = true;
-                    self.device.?.endpoint_transfer(self.ep_out, &self.echo_buf);
+                    self.device.?.endpoint_transfer(self.ep_out, &self.reader_buff);
                 }
             }
         }

@@ -206,5 +206,12 @@ pub fn main() !void {
         usb_dev.task(
             true,
         ) catch unreachable;
+        const rx_data = lw_driver.read();
+        if (rx_data.len > 0) {
+            try lw_driver.write(rx_data);
+            lw_driver.writer_flush();
+
+            lw_driver.reader_reset();
+        }
     }
 }
