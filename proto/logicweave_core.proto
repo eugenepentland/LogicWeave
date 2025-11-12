@@ -27,6 +27,7 @@ message RequestMessage {
     SleepMsRequest sleep_ms_request = 65;
     GPIOReadFunctionRequest gpio_read_function_request = 67;
     ReadVoltageRequest read_voltage_request = 71;
+    ReadResistanceRequest read_resistance_request = 72;
   }
 };
 
@@ -56,6 +57,7 @@ message ResponseMessage {
       Empty sleep_ms_response = 66;
       GPIOReadFunctionResponse gpio_read_function_response = 68;
       ReadVoltageResponse read_voltage_response = 73;
+      ReadResistanceResponse read_resistance_response = 74;
     }
 }
 
@@ -65,6 +67,14 @@ message ReadVoltageRequest {
 
 message ReadVoltageResponse {
     float voltage = 1;
+}
+
+message ReadResistanceRequest {
+  uint32 info = 1;
+}
+
+message ReadResistanceResponse {
+    float resistance = 1;
 }
 
 enum GpioFunction {
