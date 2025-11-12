@@ -2,9 +2,17 @@ const logicweave = @import("logicweave");
 const std = @import("std");
 const microzig = @import("microzig");
 const messages = @import("lw_core");
+const AP33772S = @import("drivers/AP33772S.zig");
+const INA700 = @import("drivers/INA700.zig");
+const MCP47FEB22 = @import("drivers/MCP47FEB22.zig");
+const gpio = rp2xxx.gpio;
 const rp2xxx = microzig.hal;
 const has_rp2350b = rp2xxx.compatibility.has_rp2350b;
 const lw = logicweave.init(messages);
+var err_msg_buff: [48]u8 = undefined;
+
+// used as event flag to keep IRQ handler fast
+var event: ?gpio.IrqTrigger = null;
 
 fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.ResponseMessage.kind_union {
     if (message.kind) |kind_enum| {
@@ -16,6 +24,63 @@ fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.
             .read_resistance_request => {
                 const rx = read_resistancemeter();
                 return .{ .read_resistance_response = .{ .resistance = rx } };
+            },
+            .read_pd_request => {
+                const requested_voltage = usb_pd.readRequestedVoltageMv() catch 0;
+                const requested_current = usb_pd.readRequestedCurrentMa() catch 0;
+                const measured_voltage = usb_pd.readVoltageMv() catch 0;
+                const measured_current = usb_pd.readCurrentMa() catch 0;
+
+                return .{ .read_pd_response = .{
+                    .requested_voltage_mv = requested_voltage,
+                    .requested_current_ma = requested_current,
+                    .measured_voltage_mv = measured_voltage,
+                    .measured_current_ma = measured_current,
+                } };
+            },
+            .set_psu_output_request => |request| {
+                const en_pin = switch (request.channel) {
+                    1 => ch1_en,
+                    2 => ch2_en,
+                    else => ch2_en,
+                };
+                en_pin.put(@intFromBool(request.state));
+                return .{ .set_psu_output_response = .{ .status = 200 } };
+            },
+            .read_power_monitor_request => {
+                const voltage_ch1 = pm_ch1.readVoltage() catch -1.0;
+                const voltage_ch2 = pm_ch2.readVoltage() catch -1.0;
+                const current_ch1 = pm_ch1.readCurrent() catch -1.0;
+                const current_ch2 = pm_ch2.readCurrent() catch -1.0;
+                return .{
+                    .read_power_monitor_response = .{
+                        .voltage_ch1 = voltage_ch1,
+                        .voltage_ch2 = voltage_ch2,
+                        .current_ch1 = current_ch1,
+                        .current_ch2 = current_ch2,
+                        .current_limit_ch1 = current_limit_ch1,
+                        .current_limit_ch2 = current_limit_ch2,
+                        .requested_voltage_ch1 = requested_voltage_ch1,
+                        .requested_voltage_ch2 = requested_voltage_ch2,
+                    },
+                };
+            },
+            .configure_psu_request => |request| {
+                const channel: MCP47FEB22.Channel = @enumFromInt(request.channel);
+                const dac_value = voltage_to_dac(request.voltage);
+                if (request.voltage > max_voltage) {
+                    const msg = std.fmt.bufPrint(&err_msg_buff, "CH{d} voltage must be below {d}V, requested {d}V", .{ request.channel, max_voltage, request.voltage }) catch "Error setting voltage";
+                    return .{ .error_response = .{ .message = msg } };
+                }
+                if (request.channel == 1) {
+                    current_limit_ch1 = request.current_limit;
+                    requested_voltage_ch1 = request.voltage;
+                } else {
+                    current_limit_ch2 = request.current_limit;
+                    requested_voltage_ch2 = request.voltage;
+                }
+                dac.set_voltage(channel, dac_value) catch {};
+                return .{ .configure_psu_response = .{ .status = 200 } };
             },
             else => {},
         }
@@ -30,24 +95,162 @@ const resistance_adc: rp2xxx.adc.Input = .ain7;
 const resistor_mux_a0 = rp2xxx.gpio.num(30);
 const resistor_mux_a1 = rp2xxx.gpio.num(31);
 const scale_factor: f32 = (56_000.0 + 10_000.0) / 10_000.0;
+const sda = rp2xxx.gpio.num(0);
+const ch1_en = rp2xxx.gpio.num(24);
+const ch2_en = rp2xxx.gpio.num(25);
+const pd_alert = gpio.num(2);
+const scl = rp2xxx.gpio.num(1);
+const ic2_instance = rp2xxx.i2c.instance.num(0);
+const uart_tx_pin = rp2xxx.gpio.num(12);
+const uart = rp2xxx.uart.instance.num(0);
+var usb_pd: AP33772S = undefined;
+var pm_ch1: INA700 = undefined;
+var pm_ch2: INA700 = undefined;
+var current_limit_ch1: f32 = 1.0;
+var current_limit_ch2: f32 = 1.0;
+var requested_voltage_ch1: f32 = 3.3;
+var requested_voltage_ch2: f32 = 3.3;
+var max_voltage: f32 = 5.0;
+var dac: MCP47FEB22 = undefined;
+const logging = true;
+
+fn callback_alt() linksection(".ram_text") callconv(.c) void {
+    var iter = gpio.IrqEventIter{};
+    while (iter.next()) |e| {
+        event = e;
+    }
+}
+
+pub const microzig_options = microzig.Options{
+    .log_level = .debug,
+    .logFn = rp2xxx.uart.log,
+    //.interrupts = .{ .IO_IRQ_BANK0 = .{ .c = callback_alt } },
+};
 
 pub fn main() !void {
     setup();
-
+    std.log.info("Starting!", .{});
+    lw.setup();
     lw.custom_usb_handler = &usb_handler;
-    lw.run();
+    const usb_dev = rp2xxx.usb.Usb(.{});
+
+    while (true) {
+        // Poll for USB events
+        usb_dev.task(true) catch unreachable;
+
+        lw.handleUsbRx();
+        lw.handleUsbTx();
+    }
 }
 
 fn setup() void {
-    inline for (&.{ voltmeter_switch, resistancemeter_switch, resistor_mux_a0, resistor_mux_a1 }) |pin| {
+    // Setup the interrupts
+    pd_alert.set_function(.sio);
+    pd_alert.set_direction(.in);
+    //pd_alert.set_irq_enabled(gpio.IrqEvents{ .fall = 1, .rise = 0 }, true);
+    //microzig.interrupt.enable(.IO_IRQ_BANK0);
+
+    // Set the output pins
+    inline for (&.{ voltmeter_switch, resistancemeter_switch, resistor_mux_a0, resistor_mux_a1, ch2_en, ch1_en }) |pin| {
         pin.set_function(.sio);
         pin.set_direction(.out);
     }
 
+    // Setup the ADC pins
     inline for (&.{ voltmeter_adc, resistance_adc }) |pin| {
         rp2xxx.adc.configure_gpio_pin_num(pin);
         rp2xxx.adc.apply(.{});
     }
+
+    // Setup the I2C pins
+    inline for (&.{ scl, sda }) |pin| {
+        pin.set_slew_rate(.slow);
+        pin.set_schmitt_trigger_enabled(true);
+        pin.set_function(.i2c);
+    }
+
+    ic2_instance.apply(.{
+        .clock_config = rp2xxx.clock_config,
+    });
+
+    if (logging) {
+        uart_tx_pin.set_function(.uart);
+
+        uart.apply(.{
+            .clock_config = rp2xxx.clock_config,
+        });
+        rp2xxx.uart.init_logger(uart);
+        std.log.info("Starting!", .{});
+    }
+    pm_ch1 = INA700.init(ic2_instance, @enumFromInt(0x46));
+    pm_ch2 = INA700.init(ic2_instance, @enumFromInt(0x44));
+    usb_pd = AP33772S.init(ic2_instance);
+    dac = MCP47FEB22.init(ic2_instance);
+
+    set_max_pd_voltage() catch |err| {
+        std.log.debug("Error setting the pdo: {}", .{err});
+    };
+}
+
+const V_OUT_MAX: f32 = 17.0;
+const V_OUT_MIN: f32 = 0.7;
+const DAC_MAX: u16 = 4095;
+const DAC_MIN: u16 = 0;
+
+fn voltage_to_dac(voltage: f32) u16 {
+    const clamped_voltage: f32 = @max(V_OUT_MIN, @min(V_OUT_MAX, voltage));
+    const voltage_range: f32 = V_OUT_MAX - V_OUT_MIN;
+    const dac_range: f32 = @floatFromInt(DAC_MAX - DAC_MIN);
+    const dac_value: u16 = @intFromFloat((V_OUT_MAX - clamped_voltage) * (@divFloor(dac_range, voltage_range)));
+    return @max(DAC_MIN, @min(DAC_MAX, dac_value));
+}
+
+fn set_max_pd_voltage() !void {
+    // Find what the max pdo voltage is
+    var index: usize = 0;
+    var pdo_max: AP33772S.SRC_PDO = undefined;
+    for (1..14) |i| {
+        const source_pdo = try usb_pd.readSourcePDO(@intCast(i));
+        if (source_pdo.type == 1) continue;
+        if (source_pdo.voltage_max > pdo_max.voltage_max) {
+            pdo_max = source_pdo;
+            index = i;
+        }
+    }
+
+    // Set the to the max pdo
+    requestPDOAndVerify(.{
+        .current_select = pdo_max.current_max_code,
+        .pdo_index = @intCast(index),
+        .voltage_select = 0x00,
+    }, 250) catch {
+        // when there is no PD source connected
+        pdo_max.voltage_max = 50;
+        pdo_max.current_max_code = 4;
+    };
+
+    const max_voltage_mv_f32: f32 = @floatFromInt(pdo_max.get_voltage_mv(false));
+    max_voltage = @divFloor(max_voltage_mv_f32, 1000);
+
+    std.log.debug("Max output Voltage: {d}V", .{max_voltage});
+}
+
+fn requestPDOAndVerify(pdo_request: AP33772S.PDORequest, timeout_ms: u32) !void {
+    try usb_pd.requestPDO(pdo_request);
+    const start_time = rp2xxx.time.get_time_since_boot().to_us();
+    var current_time = rp2xxx.time.get_time_since_boot().to_us();
+
+    while (current_time - start_time < timeout_ms * 1000) {
+        const result = try usb_pd.getPdMessageResult();
+        if (result == 1) {
+            std.log.info("Took {d}us to connect", .{rp2xxx.time.get_time_since_boot().to_us() - start_time});
+            return;
+        }
+        if (result != 0) return error.PDORequestFailed;
+        rp2xxx.time.sleep_ms(10);
+        current_time = rp2xxx.time.get_time_since_boot().to_us();
+    }
+    return error.PDOTimeout;
 }
 
 fn disable_all_circuits() void {

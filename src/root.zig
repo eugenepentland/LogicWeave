@@ -116,12 +116,11 @@ pub fn init(comptime ProtoDefType: anytype) type {
 
         // --- Core 0 Logic (USB Polling) ---
 
-        fn handleUsbRx() void {
+        pub fn handleUsbRx() void {
             // Read in any USB data if there is any
             const rx_data = usb_cfg.lw_driver.read();
 
             if (rx_data.len > 0) {
-                std.log.info("Reading in data: {any}", .{rx_data});
                 defer usb_cfg.lw_driver.reader_reset();
                 // Copy the data to the shared memory
                 rx_spinlock.lock();
@@ -135,7 +134,7 @@ pub fn init(comptime ProtoDefType: anytype) type {
             }
         }
 
-        fn handleUsbTx() void {
+        pub fn handleUsbTx() void {
             // Writes a response to the fifo if it gets any
             if (rp2xxx.multicore.fifo.read()) |len| {
                 tx_spinlock.lock();
@@ -143,6 +142,16 @@ pub fn init(comptime ProtoDefType: anytype) type {
                 usb_write(.driver, shared_usb_tx_buff[0..len]);
                 usb_write(.webui, shared_usb_tx_buff[0..len]);
             }
+        }
+
+        pub fn setup() void {
+            // Initialize the USB device
+            const usb_dev = usb.Usb(.{});
+            usb_dev.init_clk();
+            usb_dev.init_device(&usb_cfg.DEVICE_CONFIGURATION) catch unreachable;
+
+            // Start the 2nd core
+            rp2xxx.multicore.launch_core1_with_stack(&core1, &core1_stack);
         }
 
         pub fn run() void {
@@ -154,12 +163,7 @@ pub fn init(comptime ProtoDefType: anytype) type {
             // Start the 2nd core
             rp2xxx.multicore.launch_core1_with_stack(&core1, &core1_stack);
 
-            // Run the main loop
-            // Main loop
             while (true) {
-                // Poll for USB events
-                usb_dev.task(false) catch unreachable;
-
                 handleUsbRx();
                 handleUsbTx();
             }

@@ -28,6 +28,10 @@ message RequestMessage {
     GPIOReadFunctionRequest gpio_read_function_request = 67;
     ReadVoltageRequest read_voltage_request = 71;
     ReadResistanceRequest read_resistance_request = 72;
+    ReadPDRequest read_pd_request = 73;
+    SetPSUOutputRequest set_psu_output_request = 74;
+    ReadPowerMonitorRequest read_power_monitor_request = 75;
+    ConfigurePSURequest configure_psu_request = 76;
   }
 };
 
@@ -58,20 +62,53 @@ message ResponseMessage {
       GPIOReadFunctionResponse gpio_read_function_response = 68;
       ReadVoltageResponse read_voltage_response = 73;
       ReadResistanceResponse read_resistance_response = 74;
+      ReadPDResponse read_pd_response = 75;
+      Empty set_psu_output_response = 76;
+      ReadPowerMonitorResponse read_power_monitor_response = 77;
+      Empty configure_psu_response = 78;
     }
 }
 
-message ReadVoltageRequest {
-  uint32 info = 1;
+message ConfigurePSURequest{
+  uint32 channel = 1;
+  float voltage = 2;
+  float current_limit = 3;
 }
+
+message ReadPowerMonitorRequest{}
+
+message ReadPowerMonitorResponse{
+  float voltage_ch1 = 1;
+  float voltage_ch2 = 2;
+  float current_ch1 = 3;
+  float current_ch2 = 4;
+  float current_limit_ch1 = 5;
+  float current_limit_ch2 = 6;
+  float requested_voltage_ch1 = 7;
+  float requested_voltage_ch2 = 8;
+}
+
+message SetPSUOutputRequest{
+  uint32 channel = 1;
+  bool state = 2;
+}
+
+message ReadPDRequest {}
+
+message ReadPDResponse {
+  uint32 requested_voltage_mv = 1;
+  uint32 requested_current_ma = 2;
+  uint32 measured_voltage_mv = 3;
+  uint32 measured_current_ma = 4;
+}
+
+message ReadVoltageRequest {}
 
 message ReadVoltageResponse {
     float voltage = 1;
 }
 
-message ReadResistanceRequest {
-  uint32 info = 1;
-}
+message ReadResistanceRequest {}
 
 message ReadResistanceResponse {
     float resistance = 1;
@@ -253,9 +290,7 @@ message UartReadResponse {
   bytes data = 1;
 }
 
-message FirmwareInfoRequest {
-  uint32 info = 1;
-}
+message FirmwareInfoRequest {}
 
 message FirmwareInfoResponse {
   string hash = 1;

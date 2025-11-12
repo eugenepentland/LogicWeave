@@ -45,7 +45,7 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
         }
 
         pub fn writer_flush(self: *@This()) void {
-            std.log.info("Writing out data: {any}", .{self.writer.buffer});
+            //std.log.info("Writing out data: {any}", .{self.writer.buffer});
             if (self.writer.buffered().len == 0) return;
 
             if (!self.epin_busy) {
@@ -139,12 +139,9 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
                 std.mem.copyForwards(u8, &self.reader_buff, data[1 .. slice_len + 1]);
                 self.reader = io.Reader.fixed(self.reader_buff[0..slice_len]);
 
-                //self.reader = io.Reader.fixed(data[0..]);
-                std.log.info("Put data into reader: {any}", .{self.reader.buffered()});
             } else if (ep_addr == self.ep_boot) {
                 rp2xxx.rom.reset_to_usb_boot();
             } else if (ep_addr == self.ep_in) {
-                std.log.info("Handling ep_in", .{});
                 // IN transfer (our reply) is complete
                 self.epin_busy = false;
 

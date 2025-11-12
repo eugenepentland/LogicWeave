@@ -2383,11 +2383,7 @@ pub const UartReadResponse = struct {
 };
 
 pub const FirmwareInfoRequest = struct {
-    info: u32 = 0,
-
-    pub const _desc_table = .{
-        .info = fd(1, .{ .scalar = .uint32 }),
-    };
+    pub const _desc_table = .{};
 
     /// Encodes the message to the writer
     /// The allocator is used to generate submessages internally.

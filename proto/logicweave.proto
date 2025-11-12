@@ -233,9 +233,7 @@ message UartReadResponse {
   bytes data = 1;
 }
 
-message FirmwareInfoRequest {
-  uint32 info = 1;
-}
+message FirmwareInfoRequest {}
 
 message FirmwareInfoResponse {
   string hash = 1;
