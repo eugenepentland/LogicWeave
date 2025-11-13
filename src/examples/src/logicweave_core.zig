@@ -68,10 +68,6 @@ fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.
             .configure_psu_request => |request| {
                 const channel: MCP47FEB22.Channel = @enumFromInt(request.channel);
                 const dac_value = voltage_to_dac(request.voltage);
-                if (request.voltage > max_voltage) {
-                    const msg = std.fmt.bufPrint(&err_msg_buff, "CH{d} voltage must be below {d}V, requested {d}V", .{ request.channel, max_voltage, request.voltage }) catch "Error setting voltage";
-                    return .{ .error_response = .{ .message = msg } };
-                }
                 if (request.channel == 1) {
                     current_limit_ch1 = request.current_limit;
                     requested_voltage_ch1 = request.voltage;
@@ -112,7 +108,7 @@ var requested_voltage_ch1: f32 = 3.3;
 var requested_voltage_ch2: f32 = 3.3;
 var max_voltage: f32 = 5.0;
 var dac: MCP47FEB22 = undefined;
-const logging = true;
+const logging = false;
 
 fn callback_alt() linksection(".ram_text") callconv(.c) void {
     var iter = gpio.IrqEventIter{};
@@ -130,17 +126,17 @@ pub const microzig_options = microzig.Options{
 pub fn main() !void {
     setup();
     std.log.info("Starting!", .{});
-    lw.setup();
     lw.custom_usb_handler = &usb_handler;
-    const usb_dev = rp2xxx.usb.Usb(.{});
+    //lw.setup();
+    lw.run();
+}
 
-    while (true) {
-        // Poll for USB events
-        usb_dev.task(true) catch unreachable;
-
-        lw.handleUsbRx();
-        lw.handleUsbTx();
-    }
+fn check_current_limits() void {
+    // read the current draw on the two channels
+    const current_ch1 = pm_ch1.readCurrent() catch 5.0;
+    const current_ch2 = pm_ch2.readCurrent() catch 5.0;
+    if (current_ch1 > current_limit_ch1) ch1_en.put(0);
+    if (current_ch2 > current_limit_ch2) ch2_en.put(0);
 }
 
 fn setup() void {
