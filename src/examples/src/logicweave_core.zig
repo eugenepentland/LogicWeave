@@ -127,8 +127,15 @@ pub fn main() !void {
     setup();
     std.log.info("Starting!", .{});
     lw.custom_usb_handler = &usb_handler;
-    //lw.setup();
-    lw.run();
+    lw.setup();
+    const usb_dev = rp2xxx.usb.Usb(.{});
+
+    while (true) {
+        usb_dev.task(false) catch unreachable;
+
+        lw.handleUsbRx();
+        lw.handleUsbTx();
+    }
 }
 
 fn check_current_limits() void {

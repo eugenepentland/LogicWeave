@@ -154,7 +154,7 @@ pub fn init(comptime ProtoDefType: anytype) type {
             rp2xxx.multicore.launch_core1_with_stack(&core1, &core1_stack);
         }
 
-        pub fn run() void {
+        pub fn run() void { // depriciated
             // Initialize the USB device
             const usb_dev = usb.Usb(.{});
             usb_dev.init_clk();
@@ -164,6 +164,8 @@ pub fn init(comptime ProtoDefType: anytype) type {
             rp2xxx.multicore.launch_core1_with_stack(&core1, &core1_stack);
 
             while (true) {
+                usb_dev.task(false) catch unreachable;
+
                 handleUsbRx();
                 handleUsbTx();
             }
