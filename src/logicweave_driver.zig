@@ -138,18 +138,13 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
                 const slice_len = data[0];
                 std.mem.copyForwards(u8, &self.reader_buff, data[1 .. slice_len + 1]);
                 self.reader = io.Reader.fixed(self.reader_buff[0..slice_len]);
-
             } else if (ep_addr == self.ep_boot) {
                 rp2xxx.rom.reset_to_usb_boot();
             } else if (ep_addr == self.ep_in) {
-                // IN transfer (our reply) is complete
                 self.epin_busy = false;
-
-                // Now that we've sent our reply, we can re-arm the OUT endpoint
-                // to receive the *next* command from the host.
                 if (!self.epout_primed) {
                     self.epout_primed = true;
-                    self.device.?.endpoint_transfer(self.ep_out, self.reader.buffered());
+                    self.device.?.endpoint_transfer(self.ep_out, &self.reader_buff);
                 }
             }
         }

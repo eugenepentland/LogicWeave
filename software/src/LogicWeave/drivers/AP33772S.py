@@ -172,7 +172,7 @@ class AP33772S:
         i2c_instance: An object matching the LogicWeave i2c interface.
         """
         self.i2c_instance = i2c_instance
-        self.configure_protections(self.DEFAULT_CONFIG)
+        #self.configure_protections(self.DEFAULT_CONFIG)
 
     def __del__(self):
         """Called upon object deletion (approximation of deinit)."""

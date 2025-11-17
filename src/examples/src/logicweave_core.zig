@@ -5,6 +5,7 @@ const messages = @import("lw_core");
 const AP33772S = @import("drivers/AP33772S.zig");
 const INA700 = @import("drivers/INA700.zig");
 const MCP47FEB22 = @import("drivers/MCP47FEB22.zig");
+const I2CMutex = @import("drivers/i2c_mutex.zig").I2CMutex;
 const gpio = rp2xxx.gpio;
 const rp2xxx = microzig.hal;
 const has_rp2350b = rp2xxx.compatibility.has_rp2350b;
@@ -13,6 +14,11 @@ var err_msg_buff: [48]u8 = undefined;
 
 // used as event flag to keep IRQ handler fast
 var event: ?gpio.IrqTrigger = null;
+
+fn handle_err(msg: []const u8, err: anytype) messages.ResponseMessage.kind_union {
+    const err_msg = std.fmt.bufPrint(&err_msg_buff, "{s}: {any}", .{ msg, err }) catch "err";
+    return .{ .error_response = .{ .message = err_msg } };
+}
 
 fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.ResponseMessage.kind_union {
     if (message.kind) |kind_enum| {
@@ -39,34 +45,55 @@ fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.
                 } };
             },
             .set_psu_output_request => |request| {
-                const en_pin = switch (request.channel) {
-                    1 => ch1_en,
-                    2 => ch2_en,
-                    else => ch2_en,
-                };
-                en_pin.put(@intFromBool(request.state));
+                const is_enabled: u1 = @intFromBool(request.state);
+                switch (request.channel) {
+                    1 => {
+                        ch1_en.put(is_enabled);
+                        is_enabled_ch1 = request.state;
+                    },
+                    2 => {
+                        ch2_en.put(is_enabled);
+                        is_enabled_ch2 = request.state;
+                    },
+                    else => {},
+                }
+
                 return .{ .set_psu_output_response = .{ .status = 200 } };
             },
             .read_power_monitor_request => {
-                const voltage_ch1 = pm_ch1.readVoltage() catch -1.0;
-                const voltage_ch2 = pm_ch2.readVoltage() catch -1.0;
-                const current_ch1 = pm_ch1.readCurrent() catch -1.0;
-                const current_ch2 = pm_ch2.readCurrent() catch -1.0;
+                var voltage_ch1 = pm_ch1.readVoltage() catch |err| return handle_err("pm1 v", err);
+                rp2xxx.time.sleep_ms(1);
+                var voltage_ch2 = pm_ch2.readVoltage() catch |err| return handle_err("pm2 v", err);
+                rp2xxx.time.sleep_ms(1);
+                var current_ch1 = pm_ch1.readCurrent() catch |err| return handle_err("pm1 c", err);
+                rp2xxx.time.sleep_ms(1);
+                var current_ch2 = pm_ch2.readCurrent() catch |err| return handle_err("pm2 c", err);
+                if (!is_enabled_ch1) {
+                    voltage_ch1 = 0.0;
+                    current_ch1 = 0.0;
+                }
+                if (!is_enabled_ch2) {
+                    voltage_ch2 = 0.0;
+                    current_ch2 = 0.0;
+                }
                 return .{
-                    .read_power_monitor_response = .{
-                        .voltage_ch1 = voltage_ch1,
-                        .voltage_ch2 = voltage_ch2,
-                        .current_ch1 = current_ch1,
-                        .current_ch2 = current_ch2,
-                        .current_limit_ch1 = current_limit_ch1,
-                        .current_limit_ch2 = current_limit_ch2,
-                        .requested_voltage_ch1 = requested_voltage_ch1,
-                        .requested_voltage_ch2 = requested_voltage_ch2,
-                    },
+                    .read_power_monitor_response = .{ .channel_1 = .{
+                        .voltage = voltage_ch1,
+                        .current = current_ch1,
+                        .current_limit = current_limit_ch1,
+                        .requested_voltage = requested_voltage_ch1,
+                        .is_enabled = is_enabled_ch1,
+                    }, .channel_2 = .{
+                        .voltage = voltage_ch2,
+                        .current = current_ch2,
+                        .current_limit = current_limit_ch2,
+                        .requested_voltage = requested_voltage_ch2,
+                        .is_enabled = is_enabled_ch2,
+                    } },
                 };
             },
             .configure_psu_request => |request| {
-                const channel: MCP47FEB22.Channel = @enumFromInt(request.channel);
+                const channel: MCP47FEB22.Channel = @enumFromInt(request.channel - 1);
                 const dac_value = voltage_to_dac(request.voltage);
                 if (request.channel == 1) {
                     current_limit_ch1 = request.current_limit;
@@ -75,7 +102,7 @@ fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.
                     current_limit_ch2 = request.current_limit;
                     requested_voltage_ch2 = request.voltage;
                 }
-                dac.set_voltage(channel, dac_value) catch {};
+                dac.set_voltage(channel, dac_value) catch |err| return handle_err("DAC", err);
                 return .{ .configure_psu_response = .{ .status = 200 } };
             },
             else => {},
@@ -83,7 +110,7 @@ fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.
     }
     return .{ .error_response = .{ .message = "Erorr reading custom request" } };
 }
-
+const time = rp2xxx.time;
 const voltmeter_switch = rp2xxx.gpio.num(28);
 const resistancemeter_switch = rp2xxx.gpio.num(27);
 const voltmeter_adc: rp2xxx.adc.Input = .ain6;
@@ -96,12 +123,14 @@ const ch1_en = rp2xxx.gpio.num(24);
 const ch2_en = rp2xxx.gpio.num(25);
 const pd_alert = gpio.num(2);
 const scl = rp2xxx.gpio.num(1);
-const ic2_instance = rp2xxx.i2c.instance.num(0);
+var ic2_instance = I2CMutex.init(rp2xxx.i2c.instance.num(0));
 const uart_tx_pin = rp2xxx.gpio.num(12);
 const uart = rp2xxx.uart.instance.num(0);
 var usb_pd: AP33772S = undefined;
 var pm_ch1: INA700 = undefined;
 var pm_ch2: INA700 = undefined;
+var is_enabled_ch1: bool = false;
+var is_enabled_ch2: bool = false;
 var current_limit_ch1: f32 = 1.0;
 var current_limit_ch2: f32 = 1.0;
 var requested_voltage_ch1: f32 = 3.3;
@@ -129,12 +158,20 @@ pub fn main() !void {
     lw.custom_usb_handler = &usb_handler;
     lw.setup();
     const usb_dev = rp2xxx.usb.Usb(.{});
+    var old: u64 = time.get_time_since_boot().to_us();
+    var new: u64 = 0;
 
     while (true) {
         usb_dev.task(false) catch unreachable;
-
         lw.handleUsbRx();
         lw.handleUsbTx();
+
+        // check for over current every 5 ms
+        if (new - old > 50000) {
+            check_current_limits();
+            old = time.get_time_since_boot().to_us();
+        }
+        new = time.get_time_since_boot().to_us();
     }
 }
 
@@ -142,8 +179,14 @@ fn check_current_limits() void {
     // read the current draw on the two channels
     const current_ch1 = pm_ch1.readCurrent() catch 5.0;
     const current_ch2 = pm_ch2.readCurrent() catch 5.0;
-    if (current_ch1 > current_limit_ch1) ch1_en.put(0);
-    if (current_ch2 > current_limit_ch2) ch2_en.put(0);
+    if (current_ch1 > current_limit_ch1) {
+        ch1_en.put(0);
+        is_enabled_ch1 = false;
+    }
+    if (current_ch2 > current_limit_ch2) {
+        ch2_en.put(0);
+        is_enabled_ch2 = false;
+    }
 }
 
 fn setup() void {

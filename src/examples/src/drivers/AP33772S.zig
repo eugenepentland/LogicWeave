@@ -2,7 +2,7 @@ const std = @import("std");
 const microzig = @import("microzig");
 const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
-const i2c = rp2xxx.i2c;
+const I2CMutex = @import("i2c_mutex.zig").I2CMutex;
 const gpio = rp2xxx.gpio;
 
 const AP33772S = @This();
@@ -58,9 +58,9 @@ pub const Register = enum(u8) {
     }
 };
 
-i2c_instance: i2c.I2C,
+i2c_instance: I2CMutex,
 
-pub fn init(i2c_instance: i2c.I2C) AP33772S {
+pub fn init(i2c_instance: I2CMutex) AP33772S {
     var device = AP33772S{ .i2c_instance = i2c_instance };
     device.configureProtections(DEFAULT_CONFIG) catch {};
     return device;

@@ -5,6 +5,8 @@ package logicweave_core;
 message RequestMessage {
   oneof kind {
     // Standard requests
+    BeginTransationRequest begin_transaction_request = 2;
+    EndTransationRequest end_transaction_request = 5;
     GPIOFunctionRequest gpio_function_request = 1;
     GPIOWriteRequest gpio_write_request = 3;
     UsbBootloaderRequest usb_bootloader_request = 4;
@@ -38,6 +40,8 @@ message RequestMessage {
 message ResponseMessage {
     // Standard Responses
     oneof kind {
+      Empty begin_transaction_response = 1;
+      Empty end_transaction_respse = 2;
       ErrorResponse error_response = 10;
       Empty gpio_function_response = 42;
       Empty gpio_write_response = 5;
@@ -77,15 +81,17 @@ message ConfigurePSURequest{
 
 message ReadPowerMonitorRequest{}
 
-message ReadPowerMonitorResponse{
-  float voltage_ch1 = 1;
-  float voltage_ch2 = 2;
-  float current_ch1 = 3;
-  float current_ch2 = 4;
-  float current_limit_ch1 = 5;
-  float current_limit_ch2 = 6;
-  float requested_voltage_ch1 = 7;
-  float requested_voltage_ch2 = 8;
+message ChannelData {
+  float voltage = 1;
+  float current = 2;
+  float current_limit = 3;
+  float requested_voltage = 4;
+  bool is_enabled = 5;
+}
+
+message ReadPowerMonitorResponse {
+  ChannelData channel_1 = 1;
+  ChannelData channel_2 = 2;
 }
 
 message SetPSUOutputRequest{
@@ -112,6 +118,15 @@ message ReadResistanceRequest {}
 
 message ReadResistanceResponse {
     float resistance = 1;
+}
+
+message BeginTransationRequest {
+  string label = 1;
+}
+
+message EndTransationRequest {
+  string label = 1;
+  bool success = 2;
 }
 
 enum GpioFunction {

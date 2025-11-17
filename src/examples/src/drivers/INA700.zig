@@ -2,6 +2,7 @@ const std = @import("std");
 const microzig = @import("microzig");
 const rp2xxx = microzig.hal;
 const i2c = rp2xxx.i2c;
+const I2CMutex = @import("i2c_mutex.zig").I2CMutex;
 
 pub const INA700 = @This();
 
@@ -38,10 +39,10 @@ pub const DEFAULT_ADDRESS: i2c.Address = @enumFromInt(0x44);
 
 // --- Struct Definition ---
 
-i2c_instance: i2c.I2C,
+i2c_instance: I2CMutex, // Type changed from rp2xxx.i2c.I2C to I2CMutex
 address: i2c.Address,
 
-pub fn init(i2c_instance: i2c.I2C, address: i2c.Address) INA700 {
+pub fn init(i2c_instance: I2CMutex, address: i2c.Address) INA700 {
     return INA700{ .i2c_instance = i2c_instance, .address = address };
 }
 

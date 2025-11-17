@@ -239,20 +239,15 @@ class LogicWeave:
 
     def _setup_usb_connection(self):
         """Initializes the USB connection using pyusb."""
-        print(f"--- Attempting to connect to USB device (VID:{hex(self.vendor_id)}, PID:{hex(self.product_id)}) ---")
-        
         # 1. Find the device
         self.dev = _find_usb_device(self.vendor_id, self.product_id)
 
         if self.dev is None:
             raise DeviceConnectionError(f"Device not found. Is it plugged in and enumerated?")
 
-        print(f"✅ Found device: {self.dev.product} by {self.dev.manufacturer}")
-
         try:
             # 2. Detach kernel driver if active
             if self.dev.is_kernel_driver_active(self.interface):
-                print("    Detaching kernel driver...")
                 self.dev.detach_kernel_driver(self.interface)
                 self.kernel_driver_detached = True
 
@@ -272,8 +267,6 @@ class LogicWeave:
             if self.ep_out is None or self.ep_in is None:
                 self.dev = None
                 raise DeviceConnectionError("Could not find IN and OUT endpoints.")
-            
-            print(f"    EP OUT: {hex(self.ep_out.bEndpointAddress)}, EP IN: {hex(self.ep_in.bEndpointAddress)}")
 
         except usb.core.USBError as e:
             self.dev = None # Ensure cleanup runs cleanly if an error occurs here
@@ -381,7 +374,6 @@ class LogicWeave:
 
     def close(self):
         """Cleans up the USB connection and re-attaches the kernel driver if necessary."""
-        print("\nCleaning up USB connection...")
         if self.dev is not None:
             try:
                 # Release the interface
@@ -390,14 +382,12 @@ class LogicWeave:
                 pass 
 
             if self.kernel_driver_detached:
-                print("Re-attaching kernel driver.")
                 try:
                     self.dev.attach_kernel_driver(self.interface)
                 except usb.core.USBError:
                     pass
 
             usb.util.dispose_resources(self.dev)
-        print("Cleanup complete.")
 
     def __enter__(self):
         return self
@@ -408,7 +398,7 @@ class LogicWeave:
     # --- High-Level API Methods ---
     def read_firmware_info(self) -> 'ProtobufModule.FirmwareInfoResponse': # Type hint updated
         # Now uses self.pb
-        request = self.pb.FirmwareInfoRequest(info=1)
+        request = self.pb.FirmwareInfoRequest()
         return self._send_and_parse(request, "firmware_info_response")
 
     def write_bootloader_request(self):

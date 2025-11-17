@@ -4,6 +4,7 @@ const std = @import("std");
 const microzig = @import("microzig");
 const rp2xxx = microzig.hal;
 const i2c = rp2xxx.i2c;
+const I2CMutex = @import("i2c_mutex.zig").I2CMutex;
 
 pub const MCP47FEB22 = @This();
 
@@ -24,10 +25,10 @@ pub const Channel = enum(u8) {
     }
 };
 
-i2c_instance: i2c.I2C,
+i2c_instance: I2CMutex,
 
 /// Initializes the MCP47FEB22 controller.
-pub fn init(i2c_instance: i2c.I2C) MCP47FEB22 {
+pub fn init(i2c_instance: I2CMutex) MCP47FEB22 {
     return MCP47FEB22{ .i2c_instance = i2c_instance };
 }
 

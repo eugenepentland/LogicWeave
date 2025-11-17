@@ -39,6 +39,8 @@ pub const RequestMessage = struct {
     kind: ?kind_union = null,
 
     pub const _kind_case = enum {
+        begin_transaction_request,
+        end_transaction_request,
         gpio_function_request,
         gpio_write_request,
         usb_bootloader_request,
@@ -68,6 +70,8 @@ pub const RequestMessage = struct {
         configure_psu_request,
     };
     pub const kind_union = union(_kind_case) {
+        begin_transaction_request: BeginTransationRequest,
+        end_transaction_request: EndTransationRequest,
         gpio_function_request: GPIOFunctionRequest,
         gpio_write_request: GPIOWriteRequest,
         usb_bootloader_request: UsbBootloaderRequest,
@@ -96,6 +100,8 @@ pub const RequestMessage = struct {
         read_power_monitor_request: ReadPowerMonitorRequest,
         configure_psu_request: ConfigurePSURequest,
         pub const _desc_table = .{
+            .begin_transaction_request = fd(2, .submessage),
+            .end_transaction_request = fd(5, .submessage),
             .gpio_function_request = fd(1, .submessage),
             .gpio_write_request = fd(3, .submessage),
             .usb_bootloader_request = fd(4, .submessage),
@@ -198,6 +204,8 @@ pub const ResponseMessage = struct {
     kind: ?kind_union = null,
 
     pub const _kind_case = enum {
+        begin_transaction_response,
+        end_transaction_respse,
         error_response,
         gpio_function_response,
         gpio_write_response,
@@ -228,6 +236,8 @@ pub const ResponseMessage = struct {
         configure_psu_response,
     };
     pub const kind_union = union(_kind_case) {
+        begin_transaction_response: Empty,
+        end_transaction_respse: Empty,
         error_response: ErrorResponse,
         gpio_function_response: Empty,
         gpio_write_response: Empty,
@@ -257,6 +267,8 @@ pub const ResponseMessage = struct {
         read_power_monitor_response: ReadPowerMonitorResponse,
         configure_psu_response: Empty,
         pub const _desc_table = .{
+            .begin_transaction_response = fd(1, .submessage),
+            .end_transaction_respse = fd(2, .submessage),
             .error_response = fd(10, .submessage),
             .gpio_function_response = fd(42, .submessage),
             .gpio_write_response = fd(5, .submessage),
@@ -498,25 +510,92 @@ pub const ReadPowerMonitorRequest = struct {
     }
 };
 
-pub const ReadPowerMonitorResponse = struct {
-    voltage_ch1: f32 = 0,
-    voltage_ch2: f32 = 0,
-    current_ch1: f32 = 0,
-    current_ch2: f32 = 0,
-    current_limit_ch1: f32 = 0,
-    current_limit_ch2: f32 = 0,
-    requested_voltage_ch1: f32 = 0,
-    requested_voltage_ch2: f32 = 0,
+pub const ChannelData = struct {
+    voltage: f32 = 0,
+    current: f32 = 0,
+    current_limit: f32 = 0,
+    requested_voltage: f32 = 0,
+    is_enabled: bool = false,
 
     pub const _desc_table = .{
-        .voltage_ch1 = fd(1, .{ .scalar = .float }),
-        .voltage_ch2 = fd(2, .{ .scalar = .float }),
-        .current_ch1 = fd(3, .{ .scalar = .float }),
-        .current_ch2 = fd(4, .{ .scalar = .float }),
-        .current_limit_ch1 = fd(5, .{ .scalar = .float }),
-        .current_limit_ch2 = fd(6, .{ .scalar = .float }),
-        .requested_voltage_ch1 = fd(7, .{ .scalar = .float }),
-        .requested_voltage_ch2 = fd(8, .{ .scalar = .float }),
+        .voltage = fd(1, .{ .scalar = .float }),
+        .current = fd(2, .{ .scalar = .float }),
+        .current_limit = fd(3, .{ .scalar = .float }),
+        .requested_voltage = fd(4, .{ .scalar = .float }),
+        .is_enabled = fd(5, .{ .scalar = .bool }),
+    };
+
+    /// Encodes the message to the writer
+    /// The allocator is used to generate submessages internally.
+    /// Hence, an ArenaAllocator is a preferred choice if allocations are a bottleneck.
+    pub fn encode(
+        self: @This(),
+        writer: *std.Io.Writer,
+        allocator: std.mem.Allocator,
+    ) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+        return protobuf.encode(writer, allocator, self);
+    }
+
+    /// Decodes the message from the bytes read from the reader.
+    pub fn decode(
+        reader: *std.Io.Reader,
+        allocator: std.mem.Allocator,
+    ) (protobuf.DecodingError || std.Io.Reader.Error || std.mem.Allocator.Error)!@This() {
+        return protobuf.decode(@This(), reader, allocator);
+    }
+
+    /// Deinitializes and frees the memory associated with the message.
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        return protobuf.deinit(allocator, self);
+    }
+
+    /// Duplicates the message.
+    pub fn dupe(self: @This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
+        return protobuf.dupe(@This(), self, allocator);
+    }
+
+    /// Decodes the message from the JSON string.
+    pub fn jsonDecode(
+        input: []const u8,
+        options: std.json.ParseOptions,
+        allocator: std.mem.Allocator,
+    ) !std.json.Parsed(@This()) {
+        return protobuf.json.decode(@This(), input, options, allocator);
+    }
+
+    /// Encodes the message to a JSON string.
+    pub fn jsonEncode(
+        self: @This(),
+        options: std.json.Stringify.Options,
+        allocator: std.mem.Allocator,
+    ) ![]const u8 {
+        return protobuf.json.encode(self, options, allocator);
+    }
+
+    /// This method is used by std.json
+    /// internally for deserialization. DO NOT RENAME!
+    pub fn jsonParse(
+        allocator: std.mem.Allocator,
+        source: anytype,
+        options: std.json.ParseOptions,
+    ) !@This() {
+        return protobuf.json.parse(@This(), allocator, source, options);
+    }
+
+    /// This method is used by std.json
+    /// internally for serialization. DO NOT RENAME!
+    pub fn jsonStringify(self: *const @This(), jws: anytype) !void {
+        return protobuf.json.stringify(@This(), self, jws);
+    }
+};
+
+pub const ReadPowerMonitorResponse = struct {
+    channel_1: ?ChannelData = null,
+    channel_2: ?ChannelData = null,
+
+    pub const _desc_table = .{
+        .channel_1 = fd(1, .submessage),
+        .channel_2 = fd(2, .submessage),
     };
 
     /// Encodes the message to the writer
@@ -1010,6 +1089,150 @@ pub const ReadResistanceResponse = struct {
 
     pub const _desc_table = .{
         .resistance = fd(1, .{ .scalar = .float }),
+    };
+
+    /// Encodes the message to the writer
+    /// The allocator is used to generate submessages internally.
+    /// Hence, an ArenaAllocator is a preferred choice if allocations are a bottleneck.
+    pub fn encode(
+        self: @This(),
+        writer: *std.Io.Writer,
+        allocator: std.mem.Allocator,
+    ) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+        return protobuf.encode(writer, allocator, self);
+    }
+
+    /// Decodes the message from the bytes read from the reader.
+    pub fn decode(
+        reader: *std.Io.Reader,
+        allocator: std.mem.Allocator,
+    ) (protobuf.DecodingError || std.Io.Reader.Error || std.mem.Allocator.Error)!@This() {
+        return protobuf.decode(@This(), reader, allocator);
+    }
+
+    /// Deinitializes and frees the memory associated with the message.
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        return protobuf.deinit(allocator, self);
+    }
+
+    /// Duplicates the message.
+    pub fn dupe(self: @This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
+        return protobuf.dupe(@This(), self, allocator);
+    }
+
+    /// Decodes the message from the JSON string.
+    pub fn jsonDecode(
+        input: []const u8,
+        options: std.json.ParseOptions,
+        allocator: std.mem.Allocator,
+    ) !std.json.Parsed(@This()) {
+        return protobuf.json.decode(@This(), input, options, allocator);
+    }
+
+    /// Encodes the message to a JSON string.
+    pub fn jsonEncode(
+        self: @This(),
+        options: std.json.Stringify.Options,
+        allocator: std.mem.Allocator,
+    ) ![]const u8 {
+        return protobuf.json.encode(self, options, allocator);
+    }
+
+    /// This method is used by std.json
+    /// internally for deserialization. DO NOT RENAME!
+    pub fn jsonParse(
+        allocator: std.mem.Allocator,
+        source: anytype,
+        options: std.json.ParseOptions,
+    ) !@This() {
+        return protobuf.json.parse(@This(), allocator, source, options);
+    }
+
+    /// This method is used by std.json
+    /// internally for serialization. DO NOT RENAME!
+    pub fn jsonStringify(self: *const @This(), jws: anytype) !void {
+        return protobuf.json.stringify(@This(), self, jws);
+    }
+};
+
+pub const BeginTransationRequest = struct {
+    label: []const u8 = &.{},
+
+    pub const _desc_table = .{
+        .label = fd(1, .{ .scalar = .string }),
+    };
+
+    /// Encodes the message to the writer
+    /// The allocator is used to generate submessages internally.
+    /// Hence, an ArenaAllocator is a preferred choice if allocations are a bottleneck.
+    pub fn encode(
+        self: @This(),
+        writer: *std.Io.Writer,
+        allocator: std.mem.Allocator,
+    ) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+        return protobuf.encode(writer, allocator, self);
+    }
+
+    /// Decodes the message from the bytes read from the reader.
+    pub fn decode(
+        reader: *std.Io.Reader,
+        allocator: std.mem.Allocator,
+    ) (protobuf.DecodingError || std.Io.Reader.Error || std.mem.Allocator.Error)!@This() {
+        return protobuf.decode(@This(), reader, allocator);
+    }
+
+    /// Deinitializes and frees the memory associated with the message.
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        return protobuf.deinit(allocator, self);
+    }
+
+    /// Duplicates the message.
+    pub fn dupe(self: @This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
+        return protobuf.dupe(@This(), self, allocator);
+    }
+
+    /// Decodes the message from the JSON string.
+    pub fn jsonDecode(
+        input: []const u8,
+        options: std.json.ParseOptions,
+        allocator: std.mem.Allocator,
+    ) !std.json.Parsed(@This()) {
+        return protobuf.json.decode(@This(), input, options, allocator);
+    }
+
+    /// Encodes the message to a JSON string.
+    pub fn jsonEncode(
+        self: @This(),
+        options: std.json.Stringify.Options,
+        allocator: std.mem.Allocator,
+    ) ![]const u8 {
+        return protobuf.json.encode(self, options, allocator);
+    }
+
+    /// This method is used by std.json
+    /// internally for deserialization. DO NOT RENAME!
+    pub fn jsonParse(
+        allocator: std.mem.Allocator,
+        source: anytype,
+        options: std.json.ParseOptions,
+    ) !@This() {
+        return protobuf.json.parse(@This(), allocator, source, options);
+    }
+
+    /// This method is used by std.json
+    /// internally for serialization. DO NOT RENAME!
+    pub fn jsonStringify(self: *const @This(), jws: anytype) !void {
+        return protobuf.json.stringify(@This(), self, jws);
+    }
+};
+
+pub const EndTransationRequest = struct {
+    label: []const u8 = &.{},
+    success: bool = false,
+
+    pub const _desc_table = .{
+        .label = fd(1, .{ .scalar = .string }),
+        .success = fd(2, .{ .scalar = .bool }),
     };
 
     /// Encodes the message to the writer

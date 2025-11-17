@@ -110,9 +110,9 @@ class LogicWeaveCore(LogicWeave):
         
         # Setup the PD source and request 20V input
         self.pd = AP33772S(i2c_instance=self.i2c_instance)
-        pdo = self._get_max_fixed_pdo()
-        pdo_req = AP33772S.PDORequest(pdo.index, pdo.current_max_code, 0x00)
-        self.pd.request_pdo(pdo_req)
+        #pdo = self._get_max_fixed_pdo()
+        #pdo_req = AP33772S.PDORequest(pdo.index, pdo.current_max_code, 0x00)
+        #self.pd.request_pdo(pdo_req)
         print(f"PPS: PD voltage check: {self.pd.read_voltage_mv()}mV, Temp: {self.pd.read_temperature()}C")
 
         # Setup the DAC

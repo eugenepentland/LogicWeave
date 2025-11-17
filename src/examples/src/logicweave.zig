@@ -10,7 +10,6 @@ pub fn main() !void {
 
     while (true) {
         usb_dev.task(false) catch unreachable;
-
         lw.handleUsbRx();
         lw.handleUsbTx();
     }

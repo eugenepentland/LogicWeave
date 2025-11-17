@@ -1,0 +1,21 @@
+[0;1;32m●[0m code-server@epentland.service - code-server
+     Loaded: loaded (/lib/systemd/system/code-server@.service; enabled; vendor preset: enabled)
+     Active: [0;1;32mactive (running)[0m since Thu 2025-11-13 14:49:58 UTC; 1 day 23h ago
+   Main PID: 2309112 (node)
+      Tasks: 22 (limit: 76620)
+     Memory: 54.1M
+        CPU: 4.519s
+     CGroup: /system.slice/system-code\x2dserver.slice/code-server@epentland.service
+             ├─2309112 /usr/lib/code-server/lib/node /usr/lib/code-server
+             └─2309130 /usr/lib/code-server/lib/node /usr/lib/code-server/out/node/entry
+
+Nov 13 14:49:58 aibox systemd[1]: Starting code-server...
+Nov 13 14:49:58 aibox systemd[1]: Started code-server.
+Nov 13 14:49:58 aibox code-server[2309112]: [2025-11-13T14:49:58.480Z] info  code-server 4.21.1 45164bf749515cf826e3ccdaa3d45c714dc55e63
+Nov 13 14:49:58 aibox code-server[2309112]: [2025-11-13T14:49:58.481Z] info  Using user-data-dir /home/epentland/.local/share/code-server
+Nov 13 14:49:58 aibox code-server[2309112]: [2025-11-13T14:49:58.491Z] info  Using config file /home/epentland/.config/code-server/config.yaml
+Nov 13 14:49:58 aibox code-server[2309112]: [2025-11-13T14:49:58.491Z] info  HTTP server listening on http://127.0.0.1:8080/
+Nov 13 14:49:58 aibox code-server[2309112]: [2025-11-13T14:49:58.491Z] info    - Authentication is enabled
+Nov 13 14:49:58 aibox code-server[2309112]: [2025-11-13T14:49:58.491Z] info      - Using password from /home/epentland/.config/code-server/config.yaml
+Nov 13 14:49:58 aibox code-server[2309112]: [2025-11-13T14:49:58.491Z] info    - Not serving HTTPS
+Nov 13 14:49:58 aibox code-server[2309112]: [2025-11-13T14:49:58.491Z] info  Session server listening on /home/epentland/.local/share/code-server/code-server-ipc.sock
