@@ -12,6 +12,9 @@ const has_rp2350b = rp2xxx.compatibility.has_rp2350b;
 const lw = logicweave.init(messages);
 var err_msg_buff: [48]u8 = undefined;
 
+const flash_target_offset: u32 = 256 * 1024;
+const flash_target_contents = @as([*]const u8, @ptrFromInt(rp2xxx.flash.XIP_BASE + flash_target_offset));
+var flash_buff: [rp2xxx.flash.SECTOR_SIZE]u8 = undefined;
 // used as event flag to keep IRQ handler fast
 var event: ?gpio.IrqTrigger = null;
 
@@ -20,9 +23,23 @@ fn handle_err(msg: []const u8, err: anytype) messages.ResponseMessage.kind_union
     return .{ .error_response = .{ .message = err_msg } };
 }
 
+fn bytesToF32(bytes: []const u8) f32 {
+    // 2. Use bytesAsValue to reinterpret the 4 bytes as a *const f32.
+    // This is safe because bytesAsValue handles alignment constraints internally.
+    const f32_ptr = std.mem.bytesAsValue(f32, bytes) catch unreachable;
+
+    // 3. Dereference the pointer to get the f32 value.
+    return f32_ptr.*;
+}
+
 fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.ResponseMessage.kind_union {
     if (message.kind) |kind_enum| {
         switch (kind_enum) {
+            .cal_probes_request => {
+                const resistance_offset_bytes = flash_target_contents[0..3];
+                const resistance_offset = std.mem.bytesToValue(f32, resistance_offset_bytes);
+                return .{ .cal_probes_response = .{ .resistance_offset = resistance_offset } };
+            },
             .read_voltage_request => {
                 const vout = read_voltmeter();
                 return .{ .read_voltage_response = .{ .voltage = vout } };
@@ -153,6 +170,11 @@ pub const microzig_options = microzig.Options{
 };
 
 pub fn main() !void {
+    //const resistance_offset: f32 = 23.0;
+    //const f32_bytes = std.mem.toBytes(resistance_offset);
+    //rp2xxx.flash.range_erase(flash_target_offset, rp2xxx.flash.SECTOR_SIZE);
+    //std.mem.copyForwards(u8, &flash_buff, &f32_bytes);
+    //rp2xxx.flash.range_program(flash_target_offset, &flash_buff);
     setup();
     std.log.info("Starting!", .{});
     lw.custom_usb_handler = &usb_handler;
@@ -316,10 +338,32 @@ fn enable_resistancemeter() void {
     rp2xxx.time.sleep_ms(10);
 }
 
+fn get_sample_average(sample_count: u32) !u12 {
+    rp2xxx.adc.fifo.apply(rp2xxx.adc.fifo.Config{ .thresh = 0 });
+
+    rp2xxx.adc.start(.free_running);
+
+    var count: u32 = 0;
+    var sum: u64 = 0;
+
+    while (count < sample_count) {
+        while (rp2xxx.adc.fifo.is_empty()) {}
+
+        const batch_size = rp2xxx.adc.fifo.get_level();
+        var i: u4 = 0;
+        while (i < batch_size and count < sample_count) : (i += 1) {
+            sum += try rp2xxx.adc.fifo.pop();
+            count += 1;
+        }
+    }
+
+    return @intCast(@divTrunc(sum, sample_count));
+}
+
 fn read_voltmeter() f32 {
     enable_voltmeter();
     rp2xxx.adc.select_input(voltmeter_adc);
-    const sample = rp2xxx.adc.convert_one_shot_blocking(voltmeter_adc) catch 1;
+    const sample = get_sample_average(100) catch 1;
     const vout: f32 = (@as(f32, @floatFromInt(sample)) / 4095.0) * 3.3;
 
     const v_in = vout * scale_factor * 1.01;
@@ -407,11 +451,11 @@ fn measure_bank_sample(bank: ResistorBank) u12 {
     switch (bank) {
         .R_100_OHM => {
             resistor_mux_a1.put(0);
-            resistor_mux_a0.put(0);
+            resistor_mux_a0.put(1);
         },
         .R_1K_OHM => {
             resistor_mux_a1.put(0);
-            resistor_mux_a0.put(1);
+            resistor_mux_a0.put(0);
         },
         .R_10K_OHM => {
             resistor_mux_a1.put(1);
@@ -423,5 +467,5 @@ fn measure_bank_sample(bank: ResistorBank) u12 {
         },
     }
     rp2xxx.time.sleep_ms(5);
-    return rp2xxx.adc.convert_one_shot_blocking(resistance_adc) catch 1;
+    return get_sample_average(100) catch 1;
 }

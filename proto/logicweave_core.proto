@@ -34,6 +34,7 @@ message RequestMessage {
     SetPSUOutputRequest set_psu_output_request = 74;
     ReadPowerMonitorRequest read_power_monitor_request = 75;
     ConfigurePSURequest configure_psu_request = 76;
+    CalProbesRequest cal_probes_request = 77;
   }
 };
 
@@ -70,7 +71,14 @@ message ResponseMessage {
       Empty set_psu_output_response = 76;
       ReadPowerMonitorResponse read_power_monitor_response = 77;
       Empty configure_psu_response = 78;
+      CalProbesResponse cal_probes_response = 79;
     }
+}
+
+message CalProbesRequest {}
+
+message CalProbesResponse {
+  float resistance_offset = 1;
 }
 
 message ConfigurePSURequest{

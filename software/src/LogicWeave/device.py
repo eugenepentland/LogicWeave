@@ -2,6 +2,7 @@ import usb.core
 import usb.util
 import time
 import struct
+import platform
 # Removed: import LogicWeave.proto_gen.logicweave_pb2 as all_pb2
 from LogicWeave.exceptions import DeviceFirmwareError, DeviceResponseError, DeviceConnectionError
 import LogicWeave.proto_gen.logicweave_pb2 as lw_pb2
@@ -243,13 +244,21 @@ class LogicWeave:
         self.dev = _find_usb_device(self.vendor_id, self.product_id)
 
         if self.dev is None:
-            raise DeviceConnectionError(f"Device not found. Is it plugged in and enumerated?")
+            raise DeviceConnectionError("Device not found. Is it plugged in and enumerated?")
 
         try:
-            # 2. Detach kernel driver if active
-            if self.dev.is_kernel_driver_active(self.interface):
-                self.dev.detach_kernel_driver(self.interface)
-                self.kernel_driver_detached = True
+            # 2. Detach kernel driver if active (Linux/Unix only)
+            try:
+                if platform.system() != "Windows":
+                    if self.dev.is_kernel_driver_active(self.interface):
+                        self.dev.detach_kernel_driver(self.interface)
+                        self.kernel_driver_detached = True
+                else:
+                    # On Windows this is not supported; leave kernel_driver_detached as False
+                    self.kernel_driver_detached = False
+            except (NotImplementedError, usb.core.USBError, AttributeError):
+                # Backend or platform doesn’t support kernel-driver ops; ignore
+                self.kernel_driver_detached = False
 
             # 3. Set configuration and get interface
             self.dev.set_configuration()
@@ -258,10 +267,14 @@ class LogicWeave:
 
             # 4. Find IN and OUT endpoints
             self.ep_out = usb.util.find_descriptor(
-                intf, custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT
+                intf,
+                custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress)
+                == usb.util.ENDPOINT_OUT,
             )
             self.ep_in = usb.util.find_descriptor(
-                intf, custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN
+                intf,
+                custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress)
+                == usb.util.ENDPOINT_IN,
             )
 
             if self.ep_out is None or self.ep_in is None:
@@ -269,9 +282,9 @@ class LogicWeave:
                 raise DeviceConnectionError("Could not find IN and OUT endpoints.")
 
         except usb.core.USBError as e:
-            self.dev = None # Ensure cleanup runs cleanly if an error occurs here
+            self.dev = None  # Ensure cleanup runs cleanly if an error occurs here
             raise DeviceConnectionError(f"USB Setup Error: {e}") from e
-
+        
     # --- Peripheral Factory Methods ---
     def uart(self, instance_num: int, tx_pin: int, rx_pin: int, baud_rate: int = 115200, name: str = "uart") -> 'UART':
         return UART(self, instance_num, tx_pin, rx_pin, baud_rate)
