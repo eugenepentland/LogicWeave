@@ -21,9 +21,12 @@ pub fn init(comptime ProtoDefType: anytype) type {
         const peripherals = microzig.chip.peripherals;
         const time = rp2xxx.time;
         const usb = rp2xxx.usb;
+        pub const usb_config = usb_cfg;
 
         // Variables and Buffers
         var shared_usb_rx_buff: [128]u8 = undefined;
+        var tx_buff: [63]u8 = undefined;
+        var tx_writer: std.Io.Writer = .fixed(&tx_buff);
         var shared_usb_tx_buff: [128]u8 = undefined;
         var usb_rx_buff: [128]u8 = undefined;
         var usb_tx_buff: [128]u8 = undefined;
@@ -45,14 +48,14 @@ pub fn init(comptime ProtoDefType: anytype) type {
             while (true) {}
         }
 
-        const cdc_driver = enum {
+        const vendor_driver = enum {
             driver,
             webui,
         };
 
-        fn usb_write(driver_enum: cdc_driver, buff: []const u8) void {
-            var driver = if (driver_enum == .driver) usb_cfg.lw_driver else return;
-            driver.write(buff) catch {};
+        pub fn usb_write(vd: vendor_driver, buff: []const u8) void {
+            var driver = if (vd == .driver) &usb_cfg.driver else &usb_cfg.web;
+            driver.write(buff) catch return;
             _ = driver.writer_flush();
         }
 
@@ -114,19 +117,31 @@ pub fn init(comptime ProtoDefType: anytype) type {
             _ = usb_writer.consumeAll();
         }
 
+        pub fn txProtobufMessage(allocator: std.mem.Allocator, kind: ProtoDef.ResponseMessage.kind_union) void {
+            const response = ProtoDef.ResponseMessage{ .kind = kind };
+            response.encode(&tx_writer, allocator) catch return;
+            usb_write(.webui, tx_writer.buffered());
+            _ = tx_writer.consumeAll();
+        }
+
         // --- Core 0 Logic (USB Polling) ---
 
-        pub fn handleUsbRx() void {
+        pub fn handleUsbRx(vd: vendor_driver) void {
             // Read in any USB data if there is any
-            const rx_data = usb_cfg.lw_driver.read();
+            var driver = if (vd == .driver) &usb_cfg.driver else &usb_cfg.web;
+            const rx_data = driver.read();
+            defer driver.reader_reset();
 
             if (rx_data.len > 0) {
-                defer usb_cfg.lw_driver.reader_reset();
                 // Copy the data to the shared memory
                 rx_spinlock.lock();
                 std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data);
                 // Write the request to the webui
-                usb_write(.webui, rx_data);
+
+                //if (vd == .driver) {
+                //    usb_write(.webui, rx_data);
+                //}
+
                 rx_spinlock.unlock();
 
                 // Signal to core1 data is ready and what its length it
@@ -139,17 +154,12 @@ pub fn init(comptime ProtoDefType: anytype) type {
             if (rp2xxx.multicore.fifo.read()) |len| {
                 tx_spinlock.lock();
                 defer tx_spinlock.unlock();
-                usb_write(.driver, shared_usb_tx_buff[0..len]);
+                //usb_write(.driver, shared_usb_tx_buff[0..len]);
                 usb_write(.webui, shared_usb_tx_buff[0..len]);
             }
         }
 
         pub fn setup() void {
-            // Initialize the USB device
-            const usb_dev = usb.Usb(.{});
-            usb_dev.init_clk();
-            usb_dev.init_device(&usb_cfg.DEVICE_CONFIGURATION) catch unreachable;
-
             // Start the 2nd core
             rp2xxx.multicore.launch_core1_with_stack(&core1, &core1_stack);
         }

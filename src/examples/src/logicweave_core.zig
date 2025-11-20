@@ -1,151 +1,87 @@
-const logicweave = @import("logicweave");
 const std = @import("std");
 const microzig = @import("microzig");
-const messages = @import("lw_core");
+const logicweave = @import("logicweave");
+
+// Drivers
 const AP33772S = @import("drivers/AP33772S.zig");
 const INA700 = @import("drivers/INA700.zig");
 const MCP47FEB22 = @import("drivers/MCP47FEB22.zig");
 const I2CMutex = @import("drivers/i2c_mutex.zig").I2CMutex;
-const gpio = rp2xxx.gpio;
-const rp2xxx = microzig.hal;
-const has_rp2350b = rp2xxx.compatibility.has_rp2350b;
-const lw = logicweave.init(messages);
-var err_msg_buff: [48]u8 = undefined;
+const messages = @import("lw_core");
 
+// HAL Shortcuts
+const rp2xxx = microzig.hal;
+const gpio = rp2xxx.gpio;
+const time = rp2xxx.time;
+
+// --------------------------------------------------------------------------
+// Configuration & Constants
+// --------------------------------------------------------------------------
+
+const logging = false;
 const flash_target_offset: u32 = 256 * 1024;
 const flash_target_contents = @as([*]const u8, @ptrFromInt(rp2xxx.flash.XIP_BASE + flash_target_offset));
-var flash_buff: [rp2xxx.flash.SECTOR_SIZE]u8 = undefined;
-// used as event flag to keep IRQ handler fast
-var event: ?gpio.IrqTrigger = null;
 
-fn handle_err(msg: []const u8, err: anytype) messages.ResponseMessage.kind_union {
-    const err_msg = std.fmt.bufPrint(&err_msg_buff, "{s}: {any}", .{ msg, err }) catch "err";
-    return .{ .error_response = .{ .message = err_msg } };
-}
+// PSU / DAC Constants
+const V_OUT_MAX: f32 = 17.0;
+const V_OUT_MIN: f32 = 0.7;
+const DAC_MAX: u16 = 4095;
+const DAC_MIN: u16 = 0;
 
-fn bytesToF32(bytes: []const u8) f32 {
-    // 2. Use bytesAsValue to reinterpret the 4 bytes as a *const f32.
-    // This is safe because bytesAsValue handles alignment constraints internally.
-    const f32_ptr = std.mem.bytesAsValue(f32, bytes) catch unreachable;
-
-    // 3. Dereference the pointer to get the f32 value.
-    return f32_ptr.*;
-}
-
-fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.ResponseMessage.kind_union {
-    if (message.kind) |kind_enum| {
-        switch (kind_enum) {
-            .cal_probes_request => {
-                const resistance_offset_bytes = flash_target_contents[0..3];
-                const resistance_offset = std.mem.bytesToValue(f32, resistance_offset_bytes);
-                return .{ .cal_probes_response = .{ .resistance_offset = resistance_offset } };
-            },
-            .read_voltage_request => {
-                const vout = read_voltmeter();
-                return .{ .read_voltage_response = .{ .voltage = vout } };
-            },
-            .read_resistance_request => {
-                const rx = read_resistancemeter();
-                return .{ .read_resistance_response = .{ .resistance = rx } };
-            },
-            .read_pd_request => {
-                const requested_voltage = usb_pd.readRequestedVoltageMv() catch 0;
-                const requested_current = usb_pd.readRequestedCurrentMa() catch 0;
-                const measured_voltage = usb_pd.readVoltageMv() catch 0;
-                const measured_current = usb_pd.readCurrentMa() catch 0;
-
-                return .{ .read_pd_response = .{
-                    .requested_voltage_mv = requested_voltage,
-                    .requested_current_ma = requested_current,
-                    .measured_voltage_mv = measured_voltage,
-                    .measured_current_ma = measured_current,
-                } };
-            },
-            .set_psu_output_request => |request| {
-                const is_enabled: u1 = @intFromBool(request.state);
-                switch (request.channel) {
-                    1 => {
-                        ch1_en.put(is_enabled);
-                        is_enabled_ch1 = request.state;
-                    },
-                    2 => {
-                        ch2_en.put(is_enabled);
-                        is_enabled_ch2 = request.state;
-                    },
-                    else => {},
-                }
-
-                return .{ .set_psu_output_response = .{ .status = 200 } };
-            },
-            .read_power_monitor_request => {
-                var voltage_ch1 = pm_ch1.readVoltage() catch |err| return handle_err("pm1 v", err);
-                rp2xxx.time.sleep_ms(1);
-                var voltage_ch2 = pm_ch2.readVoltage() catch |err| return handle_err("pm2 v", err);
-                rp2xxx.time.sleep_ms(1);
-                var current_ch1 = pm_ch1.readCurrent() catch |err| return handle_err("pm1 c", err);
-                rp2xxx.time.sleep_ms(1);
-                var current_ch2 = pm_ch2.readCurrent() catch |err| return handle_err("pm2 c", err);
-                if (!is_enabled_ch1) {
-                    voltage_ch1 = 0.0;
-                    current_ch1 = 0.0;
-                }
-                if (!is_enabled_ch2) {
-                    voltage_ch2 = 0.0;
-                    current_ch2 = 0.0;
-                }
-                return .{
-                    .read_power_monitor_response = .{ .channel_1 = .{
-                        .voltage = voltage_ch1,
-                        .current = current_ch1,
-                        .current_limit = current_limit_ch1,
-                        .requested_voltage = requested_voltage_ch1,
-                        .is_enabled = is_enabled_ch1,
-                    }, .channel_2 = .{
-                        .voltage = voltage_ch2,
-                        .current = current_ch2,
-                        .current_limit = current_limit_ch2,
-                        .requested_voltage = requested_voltage_ch2,
-                        .is_enabled = is_enabled_ch2,
-                    } },
-                };
-            },
-            .configure_psu_request => |request| {
-                const channel: MCP47FEB22.Channel = @enumFromInt(request.channel - 1);
-                const dac_value = voltage_to_dac(request.voltage);
-                if (request.channel == 1) {
-                    current_limit_ch1 = request.current_limit;
-                    requested_voltage_ch1 = request.voltage;
-                } else {
-                    current_limit_ch2 = request.current_limit;
-                    requested_voltage_ch2 = request.voltage;
-                }
-                dac.set_voltage(channel, dac_value) catch |err| return handle_err("DAC", err);
-                return .{ .configure_psu_response = .{ .status = 200 } };
-            },
-            else => {},
-        }
-    }
-    return .{ .error_response = .{ .message = "Erorr reading custom request" } };
-}
-const time = rp2xxx.time;
-const voltmeter_switch = rp2xxx.gpio.num(28);
-const resistancemeter_switch = rp2xxx.gpio.num(27);
-const voltmeter_adc: rp2xxx.adc.Input = .ain6;
-const resistance_adc: rp2xxx.adc.Input = .ain7;
-const resistor_mux_a0 = rp2xxx.gpio.num(30);
-const resistor_mux_a1 = rp2xxx.gpio.num(31);
+// Resistance Meter Constants
 const scale_factor: f32 = (56_000.0 + 10_000.0) / 10_000.0;
-const sda = rp2xxx.gpio.num(0);
-const ch1_en = rp2xxx.gpio.num(24);
-const ch2_en = rp2xxx.gpio.num(25);
-const pd_alert = gpio.num(2);
-const scl = rp2xxx.gpio.num(1);
+const vin: f32 = 3.3;
+const target_sample: u12 = 2048;
+
+// --------------------------------------------------------------------------
+// Pin Definitions
+// --------------------------------------------------------------------------
+
+const pins = struct {
+    // I2C
+    const sda = gpio.num(0);
+    const scl = gpio.num(1);
+
+    // USB PD
+    const pd_alert = gpio.num(2);
+
+    // UART
+    const uart_tx = gpio.num(12);
+
+    // Power Supply Control
+    const ch1_enable = gpio.num(24);
+    const ch2_enable = gpio.num(25);
+
+    // Analog / Metering Mux & Switches
+    const resistancemeter_switch = gpio.num(27);
+    const voltmeter_switch = gpio.num(28);
+    const resistor_mux_a0 = gpio.num(30);
+    const resistor_mux_a1 = gpio.num(31);
+
+    // ADC Inputs
+    const voltmeter_adc: rp2xxx.adc.Input = .ain6;
+    const resistance_adc: rp2xxx.adc.Input = .ain7;
+};
+
+// --------------------------------------------------------------------------
+// Global State & Drivers
+// --------------------------------------------------------------------------
+
+// LogicWeave & Buffers
+const lw = logicweave.init(messages);
+var err_msg_buff: [48]u8 = undefined;
+var flash_buff: [rp2xxx.flash.PAGE_SIZE]u8 = undefined;
+var event: ?gpio.IrqTrigger = null; // Used as event flag to keep IRQ handler fast
+
+// Hardware Drivers
 var ic2_instance = I2CMutex.init(rp2xxx.i2c.instance.num(0));
-const uart_tx_pin = rp2xxx.gpio.num(12);
-const uart = rp2xxx.uart.instance.num(0);
+var uart = rp2xxx.uart.instance.num(0);
 var usb_pd: AP33772S = undefined;
 var pm_ch1: INA700 = undefined;
 var pm_ch2: INA700 = undefined;
+var dac: MCP47FEB22 = undefined;
+
+// PSU State
 var is_enabled_ch1: bool = false;
 var is_enabled_ch2: bool = false;
 var current_limit_ch1: f32 = 1.0;
@@ -153,8 +89,10 @@ var current_limit_ch2: f32 = 1.0;
 var requested_voltage_ch1: f32 = 3.3;
 var requested_voltage_ch2: f32 = 3.3;
 var max_voltage: f32 = 5.0;
-var dac: MCP47FEB22 = undefined;
-const logging = false;
+
+// --------------------------------------------------------------------------
+// MicroZig Options
+// --------------------------------------------------------------------------
 
 fn callback_alt() linksection(".ram_text") callconv(.c) void {
     var iter = gpio.IrqEventIter{};
@@ -169,87 +107,86 @@ pub const microzig_options = microzig.Options{
     //.interrupts = .{ .IO_IRQ_BANK0 = .{ .c = callback_alt } },
 };
 
+// --------------------------------------------------------------------------
+// Main Entry Point
+// --------------------------------------------------------------------------
+
 pub fn main() !void {
-    //const resistance_offset: f32 = 23.0;
-    //const f32_bytes = std.mem.toBytes(resistance_offset);
-    //rp2xxx.flash.range_erase(flash_target_offset, rp2xxx.flash.SECTOR_SIZE);
-    //std.mem.copyForwards(u8, &flash_buff, &f32_bytes);
-    //rp2xxx.flash.range_program(flash_target_offset, &flash_buff);
     setup();
+    // 1. Setup allocator for protocol handler
+    var buff: [256]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buff);
+    const allocator = fba.allocator();
     std.log.info("Starting!", .{});
+
     lw.custom_usb_handler = &usb_handler;
     lw.setup();
+
     const usb_dev = rp2xxx.usb.Usb(.{});
-    var old: u64 = time.get_time_since_boot().to_us();
-    var new: u64 = 0;
+    usb_dev.init_clk();
+    usb_dev.init_device(&lw.usb_config.DEVICE_CONFIGURATION) catch unreachable;
+    var old_time: u64 = time.get_time_since_boot().to_us();
+    var new_time: u64 = old_time;
 
     while (true) {
         usb_dev.task(false) catch unreachable;
-        lw.handleUsbRx();
+        lw.handleUsbRx(.driver);
+        lw.handleUsbRx(.webui);
         lw.handleUsbTx();
 
-        // check for over current every 5 ms
-        if (new - old > 50000) {
-            check_current_limits();
-            old = time.get_time_since_boot().to_us();
-        }
-        new = time.get_time_since_boot().to_us();
-    }
-}
+        defer new_time = time.get_time_since_boot().to_us();
 
-fn check_current_limits() void {
-    // read the current draw on the two channels
-    const current_ch1 = pm_ch1.readCurrent() catch 5.0;
-    const current_ch2 = pm_ch2.readCurrent() catch 5.0;
-    if (current_ch1 > current_limit_ch1) {
-        ch1_en.put(0);
-        is_enabled_ch1 = false;
-    }
-    if (current_ch2 > current_limit_ch2) {
-        ch2_en.put(0);
-        is_enabled_ch2 = false;
+        // Check for over-current every 50ms (50,000 us)
+        //if (new_time - old_time > 50_000) {
+        //    check_current_limits();
+        //    old_time = time.get_time_since_boot().to_us();
+        // }
+
+        if (new_time - old_time > 5000_000) {
+            defer old_time = time.get_time_since_boot().to_us();
+            fba.reset();
+            //const result = read_resistancemeter(true, undefined);
+            //_ = get_resistor_value(result.bank);
+            //lw.usb_write(.webui, "hello world");
+            lw.txProtobufMessage(allocator, .{ .read_resistance_response = .{ .resistance = 20.00, .selected_resistor_value = 100.0 } });
+        }
     }
 }
 
 fn setup() void {
-    // Setup the interrupts
-    pd_alert.set_function(.sio);
-    pd_alert.set_direction(.in);
-    //pd_alert.set_irq_enabled(gpio.IrqEvents{ .fall = 1, .rise = 0 }, true);
-    //microzig.interrupt.enable(.IO_IRQ_BANK0);
+    // 1. Setup Interrupts / IO
+    pins.pd_alert.set_function(.sio);
+    pins.pd_alert.set_direction(.in);
 
-    // Set the output pins
-    inline for (&.{ voltmeter_switch, resistancemeter_switch, resistor_mux_a0, resistor_mux_a1, ch2_en, ch1_en }) |pin| {
+    // 2. Setup Output Pins
+    inline for (&.{ pins.voltmeter_switch, pins.resistancemeter_switch, pins.resistor_mux_a0, pins.resistor_mux_a1, pins.ch2_enable, pins.ch1_enable }) |pin| {
         pin.set_function(.sio);
         pin.set_direction(.out);
     }
 
-    // Setup the ADC pins
-    inline for (&.{ voltmeter_adc, resistance_adc }) |pin| {
+    // 3. Setup ADC
+    inline for (&.{ pins.voltmeter_adc, pins.resistance_adc }) |pin| {
         rp2xxx.adc.configure_gpio_pin_num(pin);
         rp2xxx.adc.apply(.{});
     }
 
-    // Setup the I2C pins
-    inline for (&.{ scl, sda }) |pin| {
+    // 4. Setup I2C
+    inline for (&.{ pins.scl, pins.sda }) |pin| {
         pin.set_slew_rate(.slow);
         pin.set_schmitt_trigger_enabled(true);
         pin.set_function(.i2c);
     }
+    ic2_instance.apply(.{ .clock_config = rp2xxx.clock_config });
 
-    ic2_instance.apply(.{
-        .clock_config = rp2xxx.clock_config,
-    });
-
+    // 5. Logging / UART
     if (logging) {
-        uart_tx_pin.set_function(.uart);
-
-        uart.apply(.{
-            .clock_config = rp2xxx.clock_config,
-        });
+        pins.uart_tx.set_function(.uart);
+        uart.apply(.{ .clock_config = rp2xxx.clock_config });
         rp2xxx.uart.init_logger(uart);
         std.log.info("Starting!", .{});
     }
+
+    // 6. Init Drivers
     pm_ch1 = INA700.init(ic2_instance, @enumFromInt(0x46));
     pm_ch2 = INA700.init(ic2_instance, @enumFromInt(0x44));
     usb_pd = AP33772S.init(ic2_instance);
@@ -260,23 +197,303 @@ fn setup() void {
     };
 }
 
-const V_OUT_MAX: f32 = 17.0;
-const V_OUT_MIN: f32 = 0.7;
-const DAC_MAX: u16 = 4095;
-const DAC_MIN: u16 = 0;
+// --------------------------------------------------------------------------
+// USB Handler & Logic
+// --------------------------------------------------------------------------
+
+fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.ResponseMessage.kind_union {
+    if (message.kind) |kind_enum| {
+        switch (kind_enum) {
+            .read_calibration_data_request => {
+                const ftc = @as([*]const u8, @ptrFromInt(rp2xxx.flash.XIP_BASE + flash_target_offset));
+                const offset = std.mem.bytesToValue(f32, ftc[0..4]);
+                return .{ .read_calibration_data_response = .{
+                    .probe_zero_offset = offset,
+                } };
+            },
+            .zero_probes_request => {
+                //_ = read_resistancemeter(false);
+                const result = read_resistancemeter(false, .R_100_OHM);
+                if (result.resistance > 10) {
+                    return .{ .error_response = .{ .message = "Make sure probes are touching, measured more than 10 ohms" } };
+                }
+                // wipe the page
+                //rp2xxx.flash.range_erase(flash_target_offset, rp2xxx.flash.SECTOR_SIZE);
+                // Store cal offset to flash
+                const f32_bytes = std.mem.toBytes(result.resistance);
+                std.mem.copyForwards(u8, flash_buff[0..], f32_bytes[0..]);
+                rp2xxx.flash.range_program(flash_target_offset, flash_buff[0..]);
+
+                return .{ .zero_probes_response = .{ .resistance_offset = result.resistance } };
+            },
+            .read_voltage_request => {
+                const vout = read_voltmeter();
+                return .{ .read_voltage_response = .{ .voltage = vout } };
+            },
+            .read_resistance_request => {
+                const result = read_resistancemeter(true, undefined);
+                const selected_resistor_value = get_resistor_value(result.bank);
+                return .{ .read_resistance_response = .{ .resistance = result.resistance, .selected_resistor_value = selected_resistor_value } };
+            },
+            .read_pd_request => {
+                const req_v = usb_pd.readRequestedVoltageMv() catch 0;
+                const req_c = usb_pd.readRequestedCurrentMa() catch 0;
+                const meas_v = usb_pd.readVoltageMv() catch 0;
+                const meas_c = usb_pd.readCurrentMa() catch 0;
+
+                return .{ .read_pd_response = .{
+                    .requested_voltage_mv = req_v,
+                    .requested_current_ma = req_c,
+                    .measured_voltage_mv = meas_v,
+                    .measured_current_ma = meas_c,
+                } };
+            },
+            .set_psu_output_request => |request| {
+                const is_enabled: u1 = @intFromBool(request.state);
+                switch (request.channel) {
+                    1 => {
+                        pins.ch1_enable.put(is_enabled);
+                        is_enabled_ch1 = request.state;
+                    },
+                    2 => {
+                        pins.ch2_enable.put(is_enabled);
+                        is_enabled_ch2 = request.state;
+                    },
+                    else => {},
+                }
+                return .{ .set_psu_output_response = .{ .status = 200 } };
+            },
+            .read_power_monitor_request => {
+                var v_ch1 = pm_ch1.readVoltage() catch |err| return handle_err("pm1 v", err);
+                rp2xxx.time.sleep_ms(1);
+                var v_ch2 = pm_ch2.readVoltage() catch |err| return handle_err("pm2 v", err);
+                rp2xxx.time.sleep_ms(1);
+                var c_ch1 = pm_ch1.readCurrent() catch |err| return handle_err("pm1 c", err);
+                rp2xxx.time.sleep_ms(1);
+                var c_ch2 = pm_ch2.readCurrent() catch |err| return handle_err("pm2 c", err);
+
+                if (!is_enabled_ch1) {
+                    v_ch1 = 0.0;
+                    c_ch1 = 0.0;
+                }
+                if (!is_enabled_ch2) {
+                    v_ch2 = 0.0;
+                    c_ch2 = 0.0;
+                }
+
+                return .{
+                    .read_power_monitor_response = .{ .channel_1 = .{
+                        .voltage = v_ch1,
+                        .current = c_ch1,
+                        .current_limit = current_limit_ch1,
+                        .requested_voltage = requested_voltage_ch1,
+                        .is_enabled = is_enabled_ch1,
+                    }, .channel_2 = .{
+                        .voltage = v_ch2,
+                        .current = c_ch2,
+                        .current_limit = current_limit_ch2,
+                        .requested_voltage = requested_voltage_ch2,
+                        .is_enabled = is_enabled_ch2,
+                    } },
+                };
+            },
+            .configure_psu_request => |request| {
+                const channel: MCP47FEB22.Channel = @enumFromInt(request.channel - 1);
+                const dac_val = voltage_to_dac(request.voltage);
+
+                if (request.channel == 1) {
+                    current_limit_ch1 = request.current_limit;
+                    requested_voltage_ch1 = request.voltage;
+                } else {
+                    current_limit_ch2 = request.current_limit;
+                    requested_voltage_ch2 = request.voltage;
+                }
+
+                dac.set_voltage(channel, dac_val) catch |err| return handle_err("DAC", err);
+                return .{ .configure_psu_response = .{ .status = 200 } };
+            },
+            else => {},
+        }
+    }
+    return .{ .error_response = .{ .message = "Error reading custom request" } };
+}
+
+fn handle_err(msg: []const u8, err: anytype) messages.ResponseMessage.kind_union {
+    const err_msg = std.fmt.bufPrint(&err_msg_buff, "{s}: {any}", .{ msg, err }) catch "err";
+    return .{ .error_response = .{ .message = err_msg } };
+}
+
+// --------------------------------------------------------------------------
+// Resistance Logic
+// --------------------------------------------------------------------------
+
+const ResistorBank = enum {
+    R_100_OHM,
+    R_1K_OHM,
+    R_10K_OHM,
+    R_100K_OHM,
+};
+
+const resistance_result = struct {
+    resistance: f32,
+    bank: ResistorBank,
+};
+
+fn read_resistancemeter(calibrated: bool, opt_bank: ?ResistorBank) resistance_result {
+    enable_resistancemeter();
+    rp2xxx.adc.select_input(pins.resistance_adc);
+
+    if (opt_bank) |bank| {
+        const measured_sample = measure_bank_sample(bank);
+        const calculated_resistance = calculate_measured_resistance(bank, measured_sample, calibrated);
+        disable_all_circuits();
+        return .{ .bank = bank, .resistance = calculated_resistance };
+    }
+
+    var best_sample: u12 = 0;
+    var best_sample_diff: u12 = 4095;
+    var best_bank: ResistorBank = .R_100K_OHM;
+
+    // Sweep all banks to find the best one
+    for (std.enums.values(ResistorBank)) |bank| {
+        const measured_sample = measure_bank_sample(bank);
+
+        // Calculate distance from target sample (halfway point)
+        const value_diff = if (measured_sample > target_sample)
+            measured_sample - target_sample
+        else
+            target_sample - measured_sample;
+
+        if (best_sample_diff > value_diff) {
+            best_sample_diff = value_diff;
+            best_sample = measured_sample;
+            best_bank = bank;
+        }
+    }
+
+    const calculated_resistance = calculate_measured_resistance(best_bank, best_sample, calibrated);
+    disable_all_circuits();
+    return .{ .bank = best_bank, .resistance = calculated_resistance };
+}
+
+fn measure_bank_sample(bank: ResistorBank) u12 {
+    // Set Mux Pins
+    switch (bank) {
+        .R_100_OHM => {
+            pins.resistor_mux_a1.put(0);
+            pins.resistor_mux_a0.put(1);
+            rp2xxx.time.sleep_ms(5);
+        },
+        .R_1K_OHM => {
+            pins.resistor_mux_a1.put(0);
+            pins.resistor_mux_a0.put(0);
+            rp2xxx.time.sleep_ms(5);
+        },
+        .R_10K_OHM => {
+            pins.resistor_mux_a1.put(1);
+            pins.resistor_mux_a0.put(0);
+            rp2xxx.time.sleep_ms(15);
+        },
+        .R_100K_OHM => {
+            pins.resistor_mux_a1.put(1);
+            pins.resistor_mux_a0.put(1);
+            rp2xxx.time.sleep_ms(100);
+        },
+    }
+
+    // Flush first couple of readings
+    rp2xxx.adc.start(.free_running);
+    _ = rp2xxx.adc.read_result() catch 1;
+    _ = rp2xxx.adc.read_result() catch 1;
+
+    return get_sample_average(100) catch 1;
+}
+
+fn calculate_measured_resistance(bank: ResistorBank, sample: u12, calibrated: bool) f32 {
+    const r_bank = get_resistor_value(bank);
+
+    // Convert ADC sample (u12) to V_ADC (f32)
+    const v_adc: f32 = (@as(f32, @floatFromInt(sample)) / 4095.0) * vin;
+
+    // Check for short circuit
+    if (v_adc < 0.00000001) return 0.0;
+
+    const voltage_drop_r_bank = vin - v_adc;
+    const r_mux_actual: f32 = 5.0;
+    const r_top_total = r_bank + r_mux_actual;
+
+    // Calculate Rx
+    const total_bottom_resistance = r_top_total * (v_adc / voltage_drop_r_bank);
+
+    var r_x = total_bottom_resistance;
+
+    if (calibrated) {
+        const resistance_offset_bytes = flash_target_contents[0..4];
+        const resistance_offset = std.mem.bytesToValue(f32, resistance_offset_bytes);
+        r_x -= resistance_offset;
+        return if (r_x < 0.0) 0.0 else r_x;
+    }
+
+    return r_x;
+}
+
+fn get_resistor_value(bank: ResistorBank) f32 {
+    return switch (bank) {
+        .R_100_OHM => 100.0,
+        .R_1K_OHM => 1000.0,
+        .R_10K_OHM => 10000.0,
+        .R_100K_OHM => 100000.0,
+    };
+}
+
+// --------------------------------------------------------------------------
+// Voltage Logic
+// --------------------------------------------------------------------------
+
+fn read_voltmeter() f32 {
+    enable_voltmeter();
+    rp2xxx.adc.select_input(pins.voltmeter_adc);
+
+    const sample = get_sample_average(100) catch 1;
+    const vout: f32 = (@as(f32, @floatFromInt(sample)) / 4095.0) * 3.3;
+
+    const v_in = vout * scale_factor * 1.01;
+    disable_all_circuits();
+    return v_in;
+}
+
+// --------------------------------------------------------------------------
+// PSU & PD Logic
+// --------------------------------------------------------------------------
+
+fn check_current_limits() void {
+    const c_ch1 = pm_ch1.readCurrent() catch 5.0;
+    const c_ch2 = pm_ch2.readCurrent() catch 5.0;
+
+    if (c_ch1 > current_limit_ch1) {
+        pins.ch1_enable.put(0);
+        is_enabled_ch1 = false;
+    }
+    if (c_ch2 > current_limit_ch2) {
+        pins.ch2_enable.put(0);
+        is_enabled_ch2 = false;
+    }
+}
 
 fn voltage_to_dac(voltage: f32) u16 {
     const clamped_voltage: f32 = @max(V_OUT_MIN, @min(V_OUT_MAX, voltage));
     const voltage_range: f32 = V_OUT_MAX - V_OUT_MIN;
     const dac_range: f32 = @floatFromInt(DAC_MAX - DAC_MIN);
+
     const dac_value: u16 = @intFromFloat((V_OUT_MAX - clamped_voltage) * (@divFloor(dac_range, voltage_range)));
     return @max(DAC_MIN, @min(DAC_MAX, dac_value));
 }
 
 fn set_max_pd_voltage() !void {
-    // Find what the max pdo voltage is
     var index: usize = 0;
     var pdo_max: AP33772S.SRC_PDO = undefined;
+
+    // Scan for highest voltage capability
     for (1..14) |i| {
         const source_pdo = try usb_pd.readSourcePDO(@intCast(i));
         if (source_pdo.type == 1) continue;
@@ -286,14 +503,13 @@ fn set_max_pd_voltage() !void {
         }
     }
 
-    // Set the to the max pdo
     requestPDOAndVerify(.{
         .current_select = pdo_max.current_max_code,
         .pdo_index = @intCast(index),
         .voltage_select = 0x00,
     }, 250) catch {
-        // when there is no PD source connected
-        pdo_max.voltage_max = 50;
+        // Fallback if no PD source connected
+        pdo_max.voltage_max = 50; // 5.0V encoded
         pdo_max.current_max_code = 4;
     };
 
@@ -321,26 +537,29 @@ fn requestPDOAndVerify(pdo_request: AP33772S.PDORequest, timeout_ms: u32) !void 
     return error.PDOTimeout;
 }
 
+// --------------------------------------------------------------------------
+// Hardware Utilities
+// --------------------------------------------------------------------------
+
 fn disable_all_circuits() void {
-    voltmeter_switch.put(0);
-    resistancemeter_switch.put(0);
+    pins.voltmeter_switch.put(0);
+    pins.resistancemeter_switch.put(0);
 }
 
 fn enable_voltmeter() void {
     disable_all_circuits();
-    voltmeter_switch.put(1);
+    pins.voltmeter_switch.put(1);
     rp2xxx.time.sleep_ms(10);
 }
 
 fn enable_resistancemeter() void {
     disable_all_circuits();
-    resistancemeter_switch.put(1);
+    pins.resistancemeter_switch.put(1);
     rp2xxx.time.sleep_ms(10);
 }
 
 fn get_sample_average(sample_count: u32) !u12 {
     rp2xxx.adc.fifo.apply(rp2xxx.adc.fifo.Config{ .thresh = 0 });
-
     rp2xxx.adc.start(.free_running);
 
     var count: u32 = 0;
@@ -356,116 +575,5 @@ fn get_sample_average(sample_count: u32) !u12 {
             count += 1;
         }
     }
-
     return @intCast(@divTrunc(sum, sample_count));
-}
-
-fn read_voltmeter() f32 {
-    enable_voltmeter();
-    rp2xxx.adc.select_input(voltmeter_adc);
-    const sample = get_sample_average(100) catch 1;
-    const vout: f32 = (@as(f32, @floatFromInt(sample)) / 4095.0) * 3.3;
-
-    const v_in = vout * scale_factor * 1.01;
-    disable_all_circuits();
-    return v_in;
-}
-
-const ResistorBank = enum {
-    R_100_OHM,
-    R_1K_OHM,
-    R_10K_OHM,
-    R_100K_OHM,
-};
-
-const target_sample: u12 = 2048;
-
-fn read_resistancemeter() f32 {
-    // 1. Enable the resistance circuit
-    enable_resistancemeter();
-    rp2xxx.adc.select_input(resistance_adc);
-
-    // Initial values for sweep comparison
-    var best_sample: u12 = 0;
-    var best_sample_diff: u12 = 4095; // Max possible difference
-    var best_bank: ResistorBank = .R_100K_OHM; // Will be overwritten
-
-    const banks = std.enums.values(ResistorBank);
-
-    // 2. Sweep all banks to find the best one
-    for (banks) |bank| {
-        const measured_sample = measure_bank_sample(bank);
-
-        // Calculate the absolute difference from the target sample
-        const value_diff = if (measured_sample > target_sample)
-            measured_sample - target_sample
-        else
-            target_sample - measured_sample;
-
-        // Update the best bank if this one is closer to the target
-        if (best_sample_diff > value_diff) {
-            best_sample_diff = value_diff;
-            best_sample = measured_sample;
-            best_bank = bank;
-        }
-    }
-
-    // 3. Calculate the final resistance using the best bank and its measured sample
-    const calculated_resistance = calculate_measured_resistance(best_bank, best_sample);
-
-    // 4. Disable the circuit
-    disable_all_circuits();
-
-    return calculated_resistance;
-}
-
-const vin: f32 = 3.3; // Defined at the file level
-
-fn calculate_measured_resistance(bank: ResistorBank, sample: u12) f32 {
-    // 1. Determine R_bank (R_pullup_known)
-    const r_bank: f32 = switch (bank) {
-        .R_100_OHM => 100.0,
-        .R_1K_OHM => 1000.0,
-        .R_10K_OHM => 10000.0,
-        .R_100K_OHM => 100000.0,
-    };
-
-    // 2. Convert ADC sample (u12) to V_ADC (f32)
-    const v_adc: f32 = (@as(f32, @floatFromInt(sample)) / 4095.0) * vin;
-
-    // Check for short circuit (Rx = 0) - V_ADC is close to 0
-    if (v_adc < 0.01) {
-        return 0.0;
-    }
-
-    // 3. Calculate resistance Rx = R_bank * V_ADC / (Vin - V_ADC)
-    const voltage_drop_r_bank = vin - v_adc;
-
-    // Use the formula Rx = R_bank * (V_ADC / V_Rbank_Drop)
-    const r_x = r_bank * (v_adc / voltage_drop_r_bank);
-
-    return r_x;
-}
-
-fn measure_bank_sample(bank: ResistorBank) u12 {
-    switch (bank) {
-        .R_100_OHM => {
-            resistor_mux_a1.put(0);
-            resistor_mux_a0.put(1);
-        },
-        .R_1K_OHM => {
-            resistor_mux_a1.put(0);
-            resistor_mux_a0.put(0);
-        },
-        .R_10K_OHM => {
-            resistor_mux_a1.put(1);
-            resistor_mux_a0.put(0);
-        },
-        .R_100K_OHM => {
-            resistor_mux_a1.put(1);
-            resistor_mux_a0.put(1);
-        },
-    }
-    rp2xxx.time.sleep_ms(5);
-    return get_sample_average(100) catch 1;
 }

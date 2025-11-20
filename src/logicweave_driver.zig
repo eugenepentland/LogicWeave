@@ -36,6 +36,7 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
         // --- NEW: Public API functions ---
 
         pub fn write(self: *@This(), data: []const u8) !void {
+            if (self.epin_busy) return;
             _ = try self.writer.writeAll(data);
         }
 
@@ -45,18 +46,28 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
         }
 
         pub fn writer_flush(self: *@This()) void {
-            //std.log.info("Writing out data: {any}", .{self.writer.buffer});
+            // 1. If there is no data to write, do nothing.
             if (self.writer.buffered().len == 0) return;
 
-            if (!self.epin_busy) {
-                self.epin_busy = true;
-                self.writer.buffer[0] = @intCast(self.writer.end - 1);
-                self.device.?.endpoint_transfer(self.ep_in, self.writer.buffer);
-                // Reset the writer buffer
-                @memset(&self.writer_buff, 0x00);
-                self.writer = io.Writer.fixed(&self.writer_buff);
-                self.writer.end = 1;
-            }
+            // --- NEW CHECK ---
+            // 2. If ep_in is 0, the Host has not SetConfiguration yet.
+            // We cannot write to the hardware until the endpoint is open.
+            if (self.ep_in == 0) return;
+
+            // 3. If the endpoint is busy (previous transfer not finished), wait.
+            if (self.epin_busy) return;
+
+            // 4. Send the data
+            self.epin_busy = true;
+            self.writer.buffer[0] = @intCast(self.writer.end - 1);
+
+            // We use .? here because if ep_in != 0, device must be valid
+            self.device.?.endpoint_transfer(self.ep_in, self.writer.buffer);
+
+            // Reset the writer buffer
+            @memset(&self.writer_buff, 0x00);
+            self.writer = io.Writer.fixed(&self.writer_buff);
+            self.writer.end = 1;
         }
 
         pub fn reader_reset(self: *@This()) void {
@@ -68,6 +79,9 @@ pub fn LogicWeaveDriver(comptime usb: anytype) type {
             var self: *@This() = @ptrCast(@alignCast(ptr));
             var curr_cfg = cfg;
             const start_len = cfg.len;
+            self.ep_in = 0;
+            self.ep_out = 0;
+            self.ep_boot = 0;
 
             // ... (Your descriptor parsing logic is correct) ...
             if (bos.try_get_desc_as(types.InterfaceDescriptor, curr_cfg)) |desc_itf| {

@@ -68,7 +68,8 @@ pub const RequestMessage = struct {
         set_psu_output_request,
         read_power_monitor_request,
         configure_psu_request,
-        cal_probes_request,
+        zero_probes_request,
+        read_calibration_data_request,
     };
     pub const kind_union = union(_kind_case) {
         begin_transaction_request: BeginTransationRequest,
@@ -100,7 +101,8 @@ pub const RequestMessage = struct {
         set_psu_output_request: SetPSUOutputRequest,
         read_power_monitor_request: ReadPowerMonitorRequest,
         configure_psu_request: ConfigurePSURequest,
-        cal_probes_request: CalProbesRequest,
+        zero_probes_request: ZeroProbesRequest,
+        read_calibration_data_request: ReadCalibrationDataRequest,
         pub const _desc_table = .{
             .begin_transaction_request = fd(2, .submessage),
             .end_transaction_request = fd(5, .submessage),
@@ -131,7 +133,8 @@ pub const RequestMessage = struct {
             .set_psu_output_request = fd(74, .submessage),
             .read_power_monitor_request = fd(75, .submessage),
             .configure_psu_request = fd(76, .submessage),
-            .cal_probes_request = fd(77, .submessage),
+            .zero_probes_request = fd(77, .submessage),
+            .read_calibration_data_request = fd(78, .submessage),
         };
     };
 
@@ -237,7 +240,8 @@ pub const ResponseMessage = struct {
         set_psu_output_response,
         read_power_monitor_response,
         configure_psu_response,
-        cal_probes_response,
+        zero_probes_response,
+        read_calibration_data_response,
     };
     pub const kind_union = union(_kind_case) {
         begin_transaction_response: Empty,
@@ -270,7 +274,8 @@ pub const ResponseMessage = struct {
         set_psu_output_response: Empty,
         read_power_monitor_response: ReadPowerMonitorResponse,
         configure_psu_response: Empty,
-        cal_probes_response: CalProbesResponse,
+        zero_probes_response: ZeroProbesResponse,
+        read_calibration_data_response: ReadCalibrationDataResponse,
         pub const _desc_table = .{
             .begin_transaction_response = fd(1, .submessage),
             .end_transaction_respse = fd(2, .submessage),
@@ -302,7 +307,8 @@ pub const ResponseMessage = struct {
             .set_psu_output_response = fd(76, .submessage),
             .read_power_monitor_response = fd(77, .submessage),
             .configure_psu_response = fd(78, .submessage),
-            .cal_probes_response = fd(79, .submessage),
+            .zero_probes_response = fd(79, .submessage),
+            .read_calibration_data_response = fd(80, .submessage),
         };
     };
 
@@ -374,7 +380,7 @@ pub const ResponseMessage = struct {
     }
 };
 
-pub const CalProbesRequest = struct {
+pub const ReadCalibrationDataRequest = struct {
     pub const _desc_table = .{};
 
     /// Encodes the message to the writer
@@ -441,7 +447,145 @@ pub const CalProbesRequest = struct {
     }
 };
 
-pub const CalProbesResponse = struct {
+pub const ReadCalibrationDataResponse = struct {
+    probe_zero_offset: f32 = 0,
+
+    pub const _desc_table = .{
+        .probe_zero_offset = fd(1, .{ .scalar = .float }),
+    };
+
+    /// Encodes the message to the writer
+    /// The allocator is used to generate submessages internally.
+    /// Hence, an ArenaAllocator is a preferred choice if allocations are a bottleneck.
+    pub fn encode(
+        self: @This(),
+        writer: *std.Io.Writer,
+        allocator: std.mem.Allocator,
+    ) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+        return protobuf.encode(writer, allocator, self);
+    }
+
+    /// Decodes the message from the bytes read from the reader.
+    pub fn decode(
+        reader: *std.Io.Reader,
+        allocator: std.mem.Allocator,
+    ) (protobuf.DecodingError || std.Io.Reader.Error || std.mem.Allocator.Error)!@This() {
+        return protobuf.decode(@This(), reader, allocator);
+    }
+
+    /// Deinitializes and frees the memory associated with the message.
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        return protobuf.deinit(allocator, self);
+    }
+
+    /// Duplicates the message.
+    pub fn dupe(self: @This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
+        return protobuf.dupe(@This(), self, allocator);
+    }
+
+    /// Decodes the message from the JSON string.
+    pub fn jsonDecode(
+        input: []const u8,
+        options: std.json.ParseOptions,
+        allocator: std.mem.Allocator,
+    ) !std.json.Parsed(@This()) {
+        return protobuf.json.decode(@This(), input, options, allocator);
+    }
+
+    /// Encodes the message to a JSON string.
+    pub fn jsonEncode(
+        self: @This(),
+        options: std.json.Stringify.Options,
+        allocator: std.mem.Allocator,
+    ) ![]const u8 {
+        return protobuf.json.encode(self, options, allocator);
+    }
+
+    /// This method is used by std.json
+    /// internally for deserialization. DO NOT RENAME!
+    pub fn jsonParse(
+        allocator: std.mem.Allocator,
+        source: anytype,
+        options: std.json.ParseOptions,
+    ) !@This() {
+        return protobuf.json.parse(@This(), allocator, source, options);
+    }
+
+    /// This method is used by std.json
+    /// internally for serialization. DO NOT RENAME!
+    pub fn jsonStringify(self: *const @This(), jws: anytype) !void {
+        return protobuf.json.stringify(@This(), self, jws);
+    }
+};
+
+pub const ZeroProbesRequest = struct {
+    pub const _desc_table = .{};
+
+    /// Encodes the message to the writer
+    /// The allocator is used to generate submessages internally.
+    /// Hence, an ArenaAllocator is a preferred choice if allocations are a bottleneck.
+    pub fn encode(
+        self: @This(),
+        writer: *std.Io.Writer,
+        allocator: std.mem.Allocator,
+    ) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+        return protobuf.encode(writer, allocator, self);
+    }
+
+    /// Decodes the message from the bytes read from the reader.
+    pub fn decode(
+        reader: *std.Io.Reader,
+        allocator: std.mem.Allocator,
+    ) (protobuf.DecodingError || std.Io.Reader.Error || std.mem.Allocator.Error)!@This() {
+        return protobuf.decode(@This(), reader, allocator);
+    }
+
+    /// Deinitializes and frees the memory associated with the message.
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        return protobuf.deinit(allocator, self);
+    }
+
+    /// Duplicates the message.
+    pub fn dupe(self: @This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
+        return protobuf.dupe(@This(), self, allocator);
+    }
+
+    /// Decodes the message from the JSON string.
+    pub fn jsonDecode(
+        input: []const u8,
+        options: std.json.ParseOptions,
+        allocator: std.mem.Allocator,
+    ) !std.json.Parsed(@This()) {
+        return protobuf.json.decode(@This(), input, options, allocator);
+    }
+
+    /// Encodes the message to a JSON string.
+    pub fn jsonEncode(
+        self: @This(),
+        options: std.json.Stringify.Options,
+        allocator: std.mem.Allocator,
+    ) ![]const u8 {
+        return protobuf.json.encode(self, options, allocator);
+    }
+
+    /// This method is used by std.json
+    /// internally for deserialization. DO NOT RENAME!
+    pub fn jsonParse(
+        allocator: std.mem.Allocator,
+        source: anytype,
+        options: std.json.ParseOptions,
+    ) !@This() {
+        return protobuf.json.parse(@This(), allocator, source, options);
+    }
+
+    /// This method is used by std.json
+    /// internally for serialization. DO NOT RENAME!
+    pub fn jsonStringify(self: *const @This(), jws: anytype) !void {
+        return protobuf.json.stringify(@This(), self, jws);
+    }
+};
+
+pub const ZeroProbesResponse = struct {
     resistance_offset: f32 = 0,
 
     pub const _desc_table = .{
@@ -1230,9 +1374,11 @@ pub const ReadResistanceRequest = struct {
 
 pub const ReadResistanceResponse = struct {
     resistance: f32 = 0,
+    selected_resistor_value: f32 = 0,
 
     pub const _desc_table = .{
         .resistance = fd(1, .{ .scalar = .float }),
+        .selected_resistor_value = fd(2, .{ .scalar = .float }),
     };
 
     /// Encodes the message to the writer

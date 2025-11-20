@@ -34,7 +34,8 @@ message RequestMessage {
     SetPSUOutputRequest set_psu_output_request = 74;
     ReadPowerMonitorRequest read_power_monitor_request = 75;
     ConfigurePSURequest configure_psu_request = 76;
-    CalProbesRequest cal_probes_request = 77;
+    ZeroProbesRequest zero_probes_request = 77;
+    ReadCalibrationDataRequest read_calibration_data_request = 78;
   }
 };
 
@@ -71,13 +72,20 @@ message ResponseMessage {
       Empty set_psu_output_response = 76;
       ReadPowerMonitorResponse read_power_monitor_response = 77;
       Empty configure_psu_response = 78;
-      CalProbesResponse cal_probes_response = 79;
+      ZeroProbesResponse zero_probes_response = 79;
+      ReadCalibrationDataResponse read_calibration_data_response = 80;
     }
 }
 
-message CalProbesRequest {}
+message ReadCalibrationDataRequest {}
 
-message CalProbesResponse {
+message ReadCalibrationDataResponse {
+  float probe_zero_offset = 1;
+}
+
+message ZeroProbesRequest {}
+
+message ZeroProbesResponse {
   float resistance_offset = 1;
 }
 
@@ -126,6 +134,7 @@ message ReadResistanceRequest {}
 
 message ReadResistanceResponse {
     float resistance = 1;
+    float selected_resistor_value = 2;
 }
 
 message BeginTransationRequest {
