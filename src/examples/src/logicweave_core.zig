@@ -68,7 +68,7 @@ const pins = struct {
 // --------------------------------------------------------------------------
 
 // LogicWeave & Buffers
-const lw = logicweave.init(messages);
+const lw = logicweave.init(messages, .lw_core);
 var err_msg_buff: [48]u8 = undefined;
 var flash_buff: [rp2xxx.flash.PAGE_SIZE]u8 = undefined;
 var event: ?gpio.IrqTrigger = null; // Used as event flag to keep IRQ handler fast
@@ -113,10 +113,6 @@ pub const microzig_options = microzig.Options{
 
 pub fn main() !void {
     setup();
-    // 1. Setup allocator for protocol handler
-    var buff: [256]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buff);
-    const allocator = fba.allocator();
     std.log.info("Starting!", .{});
 
     lw.custom_usb_handler = &usb_handler;
@@ -137,26 +133,14 @@ pub fn main() !void {
         defer new_time = time.get_time_since_boot().to_us();
 
         // Check for over-current every 50ms (50,000 us)
-        //if (new_time - old_time > 50_000) {
-        //    check_current_limits();
-        //    old_time = time.get_time_since_boot().to_us();
-        // }
-
-        if (new_time - old_time > 5000_000) {
-            defer old_time = time.get_time_since_boot().to_us();
-            fba.reset();
-            //const result = read_resistancemeter(true, undefined);
-            //_ = get_resistor_value(result.bank);
-            //lw.usb_write(.webui, "hello world");
-            lw.txProtobufMessage(allocator, .{ .read_resistance_response = .{ .resistance = 20.00, .selected_resistor_value = 100.0 } });
+        if (new_time - old_time > 50_000) {
+            //check_current_limits();
+            old_time = time.get_time_since_boot().to_us();
         }
     }
 }
 
 fn setup() void {
-    // 1. Setup Interrupts / IO
-    pins.pd_alert.set_function(.sio);
-    pins.pd_alert.set_direction(.in);
 
     // 2. Setup Output Pins
     inline for (&.{ pins.voltmeter_switch, pins.resistancemeter_switch, pins.resistor_mux_a0, pins.resistor_mux_a1, pins.ch2_enable, pins.ch1_enable }) |pin| {
@@ -191,6 +175,11 @@ fn setup() void {
     pm_ch2 = INA700.init(ic2_instance, @enumFromInt(0x44));
     usb_pd = AP33772S.init(ic2_instance);
     dac = MCP47FEB22.init(ic2_instance);
+
+    const dac0_val = voltage_to_dac(requested_voltage_ch1);
+    const dac1_val = voltage_to_dac(requested_voltage_ch2);
+    dac.set_voltage(.dac0, dac0_val) catch {};
+    dac.set_voltage(.dac1, dac1_val) catch {};
 
     set_max_pd_voltage() catch |err| {
         std.log.debug("Error setting the pdo: {}", .{err});
@@ -264,13 +253,10 @@ fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.
                 return .{ .set_psu_output_response = .{ .status = 200 } };
             },
             .read_power_monitor_request => {
-                var v_ch1 = pm_ch1.readVoltage() catch |err| return handle_err("pm1 v", err);
-                rp2xxx.time.sleep_ms(1);
-                var v_ch2 = pm_ch2.readVoltage() catch |err| return handle_err("pm2 v", err);
-                rp2xxx.time.sleep_ms(1);
-                var c_ch1 = pm_ch1.readCurrent() catch |err| return handle_err("pm1 c", err);
-                rp2xxx.time.sleep_ms(1);
-                var c_ch2 = pm_ch2.readCurrent() catch |err| return handle_err("pm2 c", err);
+                var v_ch1 = pm_ch1.readVoltage() catch 0.0;
+                var v_ch2 = pm_ch2.readVoltage() catch 0.0;
+                var c_ch1 = pm_ch1.readCurrent() catch 0.0;
+                var c_ch2 = pm_ch2.readCurrent() catch 0.0;
 
                 if (!is_enabled_ch1) {
                     v_ch1 = 0.0;
@@ -298,7 +284,8 @@ fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.
                 };
             },
             .configure_psu_request => |request| {
-                const channel: MCP47FEB22.Channel = @enumFromInt(request.channel - 1);
+                const c: u32 = if (request.channel == 1) 1 else 0;
+                const channel: MCP47FEB22.Channel = @enumFromInt(c);
                 const dac_val = voltage_to_dac(request.voltage);
 
                 if (request.channel == 1) {
@@ -485,7 +472,7 @@ fn voltage_to_dac(voltage: f32) u16 {
     const voltage_range: f32 = V_OUT_MAX - V_OUT_MIN;
     const dac_range: f32 = @floatFromInt(DAC_MAX - DAC_MIN);
 
-    const dac_value: u16 = @intFromFloat((V_OUT_MAX - clamped_voltage) * (@divFloor(dac_range, voltage_range)));
+    const dac_value: u16 = @intFromFloat(((V_OUT_MAX - clamped_voltage) * 0.99) * (@divFloor(dac_range, voltage_range)));
     return @max(DAC_MIN, @min(DAC_MAX, dac_value));
 }
 
