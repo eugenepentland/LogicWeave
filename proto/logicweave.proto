@@ -28,6 +28,7 @@ message RequestMessage {
     PWMSetLevelRequest pwm_set_level_request = 63;
     SleepMsRequest sleep_ms_request = 65;
     GPIOReadFunctionRequest gpio_read_function_request = 67;
+    StreamUartRequest stream_uart_request = 79;
   }
 };
 
@@ -58,7 +59,20 @@ message ResponseMessage {
       Empty pwm_set_level_response = 64;
       Empty sleep_ms_response = 66;
       GPIOReadFunctionResponse gpio_read_function_response = 68;
+      StreamUartResponse stream_uart_response = 81;
     }
+}
+
+message StreamUartRequest {
+  bool enabled = 1;
+  uint32 baud_rate = 2;
+  uint32 tx_pin = 4;
+  uint32 rx_pin = 5;
+  uint32 instance_num = 6;
+}
+
+message StreamUartResponse {
+  bytes data = 1;
 }
 
 enum GpioFunction {

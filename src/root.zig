@@ -83,7 +83,7 @@ pub fn init(comptime ProtoDefType: anytype, d: ProtoDefType.Device) type {
         // --- Core 1 Logic (Protocol Handling) ---
 
         fn core1() void {
-            enable_fpu();
+            //enable_fpu();
             // 1. Setup allocator for protocol handler
             var buff: [512]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&buff);

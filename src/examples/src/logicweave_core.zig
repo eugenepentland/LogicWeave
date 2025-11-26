@@ -89,7 +89,7 @@ var requested_voltage_ch1: f32 = 3.3;
 var requested_voltage_ch2: f32 = 3.3;
 var max_voltage: f32 = 5.0;
 const BUFFER_SIZE = 32;
-const TIMEOUT_MS = 5000;
+const TIMEOUT_US = 5000;
 var uart_buf: [BUFFER_SIZE]u8 = undefined;
 var buf_index: usize = 0;
 var last_rx_time: u64 = 0;
@@ -118,36 +118,58 @@ pub const microzig_options = microzig.Options{
 pub fn main() !void {
     setup();
     std.log.info("Starting!", .{});
+
+    // 1. Setup Allocator for Protobuf
     var buff: [512]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buff);
     const allocator = fba.allocator();
+
+    // 2. Setup USB
     lw.custom_usb_handler = &usb_handler;
     lw.setup();
-
     const usb_dev = rp2xxx.usb.Usb(.{});
     usb_dev.init_clk();
     usb_dev.init_device(&lw.usb_config.DEVICE_CONFIGURATION) catch unreachable;
-    var old_time: u64 = time.get_time_since_boot().to_us();
-    var new_time: u64 = old_time;
 
     while (true) {
+        // --- USB TASKS ---
         usb_dev.task(false) catch unreachable;
-        //lw.handleUsbRx(.driver);
         lw.handleUsbRx(.webui);
         lw.handleUsbTx();
 
+        // --- UART HANDLING ---
         if (lw.uart_stream_instance) |uart| {
+
+            // A. Read all currently available bytes from UART FIFO
+            // read_word() returns null if no data is waiting, breaking this inner loop
             while (try uart.read_word()) |byte| {
                 uart_buf[buf_index] = byte;
                 buf_index += 1;
 
-                // Update the "watchdog" timer for the timeout
+                // Update the timer whenever we get fresh data
                 last_rx_time = time.get_time_since_boot().to_us();
 
-                // CONDITIONAL SEND 1: Buffer Full
+                // CONDITION 1: Buffer Full
                 if (buf_index >= BUFFER_SIZE) {
                     lw.txProtobufMessage(allocator, .{ .stream_uart_response = .{ .data = uart_buf[0..buf_index] } });
-                    buf_index = 0; // Reset buffer
+
+                    // Reset
+                    buf_index = 0;
+                    fba.reset();
+                }
+            }
+
+            // B. Check Timeout
+            // We only care about timeout if there is data pending in the buffer
+            if (buf_index > 0) {
+                const current_time = time.get_time_since_boot().to_us();
+
+                // CONDITION 2: 5ms have passed since last data received
+                if (current_time - last_rx_time > TIMEOUT_US) {
+                    lw.txProtobufMessage(allocator, .{ .stream_uart_response = .{ .data = uart_buf[0..buf_index] } });
+
+                    // Reset
+                    buf_index = 0;
                     fba.reset();
                 }
             }

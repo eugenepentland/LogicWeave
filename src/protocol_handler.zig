@@ -116,15 +116,18 @@ fn process_request(
     if (message.kind) |kind_enum| {
         switch (kind_enum) {
             .firmware_info_request => |_| {
-                const id_array = try getUniqueBoardId();
-                var id_buff: []u8 = try allocator.alloc(u8, 17);
-                picoGetUniqueBoardIdString(id_buff, id_array);
+                //const id_array = try getUniqueBoardId();
+                //var id_buff: []u8 = try allocator.alloc(u8, 17);
+                //picoGetUniqueBoardIdString(id_buff, id_array);
                 // Response created and encoded as requested (was already this way)
-                return .{ .firmware_info_response = .{
-                    .device = Context.device,
-                    .version = firmware_config.version,
-                    .serial_number = id_buff[0 .. id_buff.len - 1],
-                } };
+                return .{
+                    .firmware_info_response = .{
+                        .device = Context.device,
+                        .version = firmware_config.version,
+                        //.serial_number = id_buff[0 .. id_buff.len - 1],
+                        .serial_number = "hello",
+                    },
+                };
             },
             .usb_bootloader_request => {
                 // This is a special response that just writes a byte
@@ -132,7 +135,7 @@ fn process_request(
             },
             .stream_uart_request => |request| {
                 if (!request.enabled) {
-                    Context.uart_stream_instance = undefined;
+                    Context.uart_stream_instance = null;
                     return .{ .stream_uart_response = .{ .data = &.{} } };
                 }
                 const tx_pin = getGPIO(request.tx_pin);
@@ -156,12 +159,12 @@ fn process_request(
                 const regs = pin.get_regs();
                 const func_selc = regs.ctrl.read().FUNCSEL;
                 const function: ProtoDef.GpioFunction = switch (func_selc) {
-                    .hstx => .hstx,
+                    //.hstx => .hstx,
                     .spi => .spi,
-                    .uart, .uart_alt => .uart,
+                    //.uart, .uart_alt => .uart,
                     .i2c => .i2c,
                     .pwm => .pwm,
-                    .pio0, .pio1, .pio2 => .pio,
+                    //.pio0, .pio1, .pio2 => .pio,
                     .gpck => .gpck,
                     .usb => .usb,
                     .sio => switch (read_direction(pin)) {
