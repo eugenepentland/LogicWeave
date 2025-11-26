@@ -246,10 +246,17 @@ message UartReadResponse {
   bytes data = 1;
 }
 
+enum Device {
+  rp2040 = 0;
+  rp2350 = 1;
+  rp2350b = 2;
+  lw_core = 3;
+}
+
 message FirmwareInfoRequest {}
 
 message FirmwareInfoResponse {
-  string hash = 1;
+  Device device = 1;
   string version = 2;
   string serial_number = 3;
 }

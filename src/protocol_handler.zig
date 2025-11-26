@@ -105,7 +105,13 @@ pub inline fn read_direction(gpio: rp2xxx.gpio.Pin) rp2xxx.gpio.Direction {
     }
 }
 
-fn process_request(allocator: std.mem.Allocator, ProtoDef: type, message: ProtoDef.RequestMessage, custom_handler: ?*const fn (std.mem.Allocator, ProtoDef.RequestMessage) ProtoDef.ResponseMessage.kind_union) !ProtoDef.ResponseMessage.kind_union {
+fn process_request(
+    allocator: std.mem.Allocator,
+    comptime Context: type, // This holds ProtoDef, device, custom_handler, etc.
+    message: Context.ProtoDef.RequestMessage,
+) !Context.ProtoDef.ResponseMessage.kind_union {
+    // Alias ProtoDef for brevity inside the function
+    const ProtoDef = Context.ProtoDef;
     // Match on the kind of message
     if (message.kind) |kind_enum| {
         switch (kind_enum) {
@@ -115,7 +121,7 @@ fn process_request(allocator: std.mem.Allocator, ProtoDef: type, message: ProtoD
                 picoGetUniqueBoardIdString(id_buff, id_array);
                 // Response created and encoded as requested (was already this way)
                 return .{ .firmware_info_response = .{
-                    .hash = firmware_config.GIT_HASH,
+                    .device = Context.device,
                     .version = firmware_config.version,
                     .serial_number = id_buff[0 .. id_buff.len - 1],
                 } };
@@ -123,6 +129,27 @@ fn process_request(allocator: std.mem.Allocator, ProtoDef: type, message: ProtoD
             .usb_bootloader_request => {
                 // This is a special response that just writes a byte
                 return .{ .gpio_read_response = .{ .state = true } };
+            },
+            .stream_uart_request => |request| {
+                if (!request.enabled) {
+                    Context.uart_stream_instance = undefined;
+                    return .{ .stream_uart_response = .{ .data = &.{} } };
+                }
+                const tx_pin = getGPIO(request.tx_pin);
+                const rx_pin = getGPIO(request.rx_pin);
+                const uart = rp2xxx.uart.instance.num(@intCast(request.instance_num));
+
+                inline for (&.{ tx_pin, rx_pin }) |pin| {
+                    pin.set_function(.uart);
+                }
+
+                try uart.apply_runtime(.{
+                    .baud_rate = @intCast(request.baud_rate),
+                    .clock_config = rp2xxx.clock_config,
+                });
+                Context.uart_stream_instance = uart;
+                // Refactored to use explicit response constant
+                return .{ .stream_uart_response = .{ .data = &.{} } };
             },
             .gpio_read_function_request => |request| {
                 const pin: rp2xxx.gpio.Pin = @enumFromInt(request.gpio_pin);
@@ -360,7 +387,7 @@ fn process_request(allocator: std.mem.Allocator, ProtoDef: type, message: ProtoD
                 return .{ .sleep_ms_response = .{ .status = 200 } };
             },
             else => {
-                if (custom_handler) |handler| {
+                if (Context.custom_usb_handler) |handler| {
                     return handler(allocator, message);
                 }
             },
@@ -369,11 +396,17 @@ fn process_request(allocator: std.mem.Allocator, ProtoDef: type, message: ProtoD
     return error.RequestNotFound;
 }
 
-pub fn handle_incoming_usb(allocator: std.mem.Allocator, reader: *std.Io.Reader, writer: *std.Io.Writer, ProtoDef: type, custom_handler: ?*const fn (std.mem.Allocator, ProtoDef.RequestMessage) ProtoDef.ResponseMessage.kind_union) !void {
+pub fn handle_incoming_usb(
+    allocator: std.mem.Allocator,
+    reader: *std.Io.Reader,
+    writer: *std.Io.Writer,
+    comptime Context: type, // <--- Add this
+    ProtoDef: type,
+) !void {
     var msg = ProtoDef.RequestMessage.decode(reader, allocator) catch return error.ErrorDecoding;
     defer msg.deinit(allocator);
 
-    const response_kind = process_request(allocator, ProtoDef, msg, custom_handler) catch @as(ProtoDef.ResponseMessage.kind_union, .{ .error_response = .{ .message = "error processing" } });
+    const response_kind = process_request(allocator, Context, msg) catch @as(ProtoDef.ResponseMessage.kind_union, .{ .error_response = .{ .message = "error processing" } });
     const response = ProtoDef.ResponseMessage{ .kind = response_kind };
     response.encode(writer, allocator) catch return error.ErrorEncoding;
 }

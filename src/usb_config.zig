@@ -161,7 +161,7 @@ pub var drivers = [_]usb.types.UsbClassDriver{
     web.driver()
 };
 
-const WEBUSB_URL = "webusb.eugenepentland.dev/";
+const WEBUSB_URL = "logicweave.eugenepentland.dev/";
 
 const webusb_url_descriptor = &[_]u8{
     @as(u8, WEBUSB_URL.len + 3),

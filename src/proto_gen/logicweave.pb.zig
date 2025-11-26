@@ -35,6 +35,14 @@ pub const PinPullState = enum(i32) {
     _,
 };
 
+pub const Device = enum(i32) {
+    rp2040 = 0,
+    rp2350 = 1,
+    rp2350b = 2,
+    lw_core = 3,
+    _,
+};
+
 pub const RequestMessage = struct {
     kind: ?kind_union = null,
 
@@ -2606,12 +2614,12 @@ pub const FirmwareInfoRequest = struct {
 };
 
 pub const FirmwareInfoResponse = struct {
-    hash: []const u8 = &.{},
+    device: Device = @enumFromInt(0),
     version: []const u8 = &.{},
     serial_number: []const u8 = &.{},
 
     pub const _desc_table = .{
-        .hash = fd(1, .{ .scalar = .string }),
+        .device = fd(1, .@"enum"),
         .version = fd(2, .{ .scalar = .string }),
         .serial_number = fd(3, .{ .scalar = .string }),
     };

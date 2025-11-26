@@ -75,7 +75,6 @@ var event: ?gpio.IrqTrigger = null; // Used as event flag to keep IRQ handler fa
 
 // Hardware Drivers
 var ic2_instance = I2CMutex.init(rp2xxx.i2c.instance.num(0));
-var uart = rp2xxx.uart.instance.num(0);
 var usb_pd: AP33772S = undefined;
 var pm_ch1: INA700 = undefined;
 var pm_ch2: INA700 = undefined;
@@ -89,7 +88,13 @@ var current_limit_ch2: f32 = 1.0;
 var requested_voltage_ch1: f32 = 3.3;
 var requested_voltage_ch2: f32 = 3.3;
 var max_voltage: f32 = 5.0;
-
+const BUFFER_SIZE = 32;
+const TIMEOUT_MS = 5000;
+var uart_buf: [BUFFER_SIZE]u8 = undefined;
+var buf_index: usize = 0;
+var last_rx_time: u64 = 0;
+var uart_writer_buf: [128]u8 = undefined;
+var uart_writer: std.Io.Writer = .fixed(&uart_writer_buf);
 // --------------------------------------------------------------------------
 // MicroZig Options
 // --------------------------------------------------------------------------
@@ -104,7 +109,6 @@ fn callback_alt() linksection(".ram_text") callconv(.c) void {
 pub const microzig_options = microzig.Options{
     .log_level = .debug,
     .logFn = rp2xxx.uart.log,
-    //.interrupts = .{ .IO_IRQ_BANK0 = .{ .c = callback_alt } },
 };
 
 // --------------------------------------------------------------------------
@@ -114,7 +118,9 @@ pub const microzig_options = microzig.Options{
 pub fn main() !void {
     setup();
     std.log.info("Starting!", .{});
-
+    var buff: [512]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buff);
+    const allocator = fba.allocator();
     lw.custom_usb_handler = &usb_handler;
     lw.setup();
 
@@ -126,16 +132,25 @@ pub fn main() !void {
 
     while (true) {
         usb_dev.task(false) catch unreachable;
-        lw.handleUsbRx(.driver);
+        //lw.handleUsbRx(.driver);
         lw.handleUsbRx(.webui);
         lw.handleUsbTx();
 
-        defer new_time = time.get_time_since_boot().to_us();
+        if (lw.uart_stream_instance) |uart| {
+            while (try uart.read_word()) |byte| {
+                uart_buf[buf_index] = byte;
+                buf_index += 1;
 
-        // Check for over-current every 50ms (50,000 us)
-        if (new_time - old_time > 50_000) {
-            //check_current_limits();
-            old_time = time.get_time_since_boot().to_us();
+                // Update the "watchdog" timer for the timeout
+                last_rx_time = time.get_time_since_boot().to_us();
+
+                // CONDITIONAL SEND 1: Buffer Full
+                if (buf_index >= BUFFER_SIZE) {
+                    lw.txProtobufMessage(allocator, .{ .stream_uart_response = .{ .data = uart_buf[0..buf_index] } });
+                    buf_index = 0; // Reset buffer
+                    fba.reset();
+                }
+            }
         }
     }
 }
@@ -161,14 +176,6 @@ fn setup() void {
         pin.set_function(.i2c);
     }
     ic2_instance.apply(.{ .clock_config = rp2xxx.clock_config });
-
-    // 5. Logging / UART
-    if (logging) {
-        pins.uart_tx.set_function(.uart);
-        uart.apply(.{ .clock_config = rp2xxx.clock_config });
-        rp2xxx.uart.init_logger(uart);
-        std.log.info("Starting!", .{});
-    }
 
     // 6. Init Drivers
     pm_ch1 = INA700.init(ic2_instance, @enumFromInt(0x46));

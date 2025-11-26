@@ -1,6 +1,6 @@
 pub const protocol_handler = @import("protocol_handler.zig");
 
-pub fn init(comptime ProtoDefType: anytype) type {
+pub fn init(comptime ProtoDefType: anytype, d: ProtoDefType.Device) type {
     // Aliases required by the module's implementation
     const std = @import("std");
     const microzig = @import("microzig");
@@ -18,6 +18,7 @@ pub fn init(comptime ProtoDefType: anytype) type {
         // --- Standard Public/Internal Constants and Variables ---
 
         pub const protobuf = @import("protobuf");
+        pub const device = d;
         const peripherals = microzig.chip.peripherals;
         const time = rp2xxx.time;
         const usb = rp2xxx.usb;
@@ -30,6 +31,7 @@ pub fn init(comptime ProtoDefType: anytype) type {
         var shared_usb_tx_buff: [128]u8 = undefined;
         var usb_rx_buff: [128]u8 = undefined;
         var usb_tx_buff: [128]u8 = undefined;
+        pub var uart_stream_instance: ?rp2xxx.uart.UART = undefined;
         pub var usb_writer: std.Io.Writer = .fixed(&usb_tx_buff);
         pub const custom_usb_handler_type = ?*const fn (std.mem.Allocator, ProtoDef.RequestMessage) ProtoDef.ResponseMessage.kind_union;
         pub var custom_usb_handler: custom_usb_handler_type = null;
@@ -54,9 +56,8 @@ pub fn init(comptime ProtoDefType: anytype) type {
         };
 
         pub fn usb_write(vd: vendor_driver, buff: []const u8) void {
-            var driver = if (vd == .driver) &usb_cfg.driver else &usb_cfg.web;
+            var driver = if (vd == .driver) &usb_cfg.web else &usb_cfg.web;
             driver.write(buff) catch return;
-            _ = driver.writer_flush();
         }
 
         fn enable_fpu() void {
@@ -84,7 +85,7 @@ pub fn init(comptime ProtoDefType: anytype) type {
         fn core1() void {
             enable_fpu();
             // 1. Setup allocator for protocol handler
-            var buff: [256]u8 = undefined;
+            var buff: [512]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&buff);
             const allocator = fba.allocator();
 
@@ -104,8 +105,11 @@ pub fn init(comptime ProtoDefType: anytype) type {
             rx_spinlock.unlock();
 
             var reader: std.Io.Reader = std.Io.Reader.fixed(incoming_data);
-            // Get the response kind
-            protocol_handler.handle_incoming_usb(allocator, &reader, &usb_writer, ProtoDef, custom_usb_handler) catch |err| {
+
+            // --- MODIFIED CALL HERE ---
+            // We pass @This() as the Context argument
+            protocol_handler.handle_incoming_usb(allocator, &reader, &usb_writer, @This(), // <--- Pass the current Type here
+                ProtoDef) catch |err| {
                 var err_buff: [64]u8 = undefined;
                 const formatted_err = std.fmt.bufPrint(err_buff[0..], "{any}", .{err}) catch "format error";
                 const response = ProtoDef.ResponseMessage{ .kind = .{ .error_response = .{ .message = formatted_err } } };
@@ -127,25 +131,24 @@ pub fn init(comptime ProtoDefType: anytype) type {
         // --- Core 0 Logic (USB Polling) ---
 
         pub fn handleUsbRx(vd: vendor_driver) void {
-            // Read in any USB data if there is any
-            var driver = if (vd == .driver) &usb_cfg.driver else &usb_cfg.web;
-            const rx_data = driver.read();
-            defer driver.reader_reset();
+            var driver = if (vd == .driver) &usb_cfg.web else &usb_cfg.web;
+            const rx_data_opt = driver.read();
 
-            if (rx_data.len > 0) {
-                // Copy the data to the shared memory
-                rx_spinlock.lock();
-                std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data);
-                // Write the request to the webui
+            if (rx_data_opt) |rx_data| {
+                // Moved DEFER here.
+                // We MUST consume the packet to re-arm the USB endpoint,
+                // even if the length is 0 or we don't process it.
+                defer driver.read_consume();
 
-                //if (vd == .driver) {
-                //    usb_write(.webui, rx_data);
-                //}
+                if (rx_data.len > 0) {
+                    // Copy the data to the shared memory
+                    rx_spinlock.lock();
+                    std.mem.copyForwards(u8, &shared_usb_rx_buff, rx_data);
+                    rx_spinlock.unlock();
 
-                rx_spinlock.unlock();
-
-                // Signal to core1 data is ready and what its length it
-                rp2xxx.multicore.fifo.write_blocking(@intCast(rx_data.len));
+                    // Signal to core1
+                    rp2xxx.multicore.fifo.write_blocking(@intCast(rx_data.len));
+                }
             }
         }
 
