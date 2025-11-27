@@ -1,6 +1,6 @@
 [project]
 name = "logic-weave"
-version = "0.4.4"
+version = "0.4.5"
 description = "A Python client library for communicating with the firmware device over serial."
 readme = "README.md"
 requires-python = ">=3.8"
