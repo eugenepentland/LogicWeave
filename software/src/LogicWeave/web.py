@@ -375,3 +375,54 @@ class WebLogicWeave(SyncLogicWeave):
     async def read_pin_function(self, gpio_pin):
         request = self.pb.GPIOReadFunctionRequest(gpio_pin=gpio_pin)
         return await self._send_and_parse(request, "gpio_read_function_response")
+    
+import LogicWeave.proto_gen.logicweave_core_pb2 as logicweave_core_pb2
+
+# Inherit from the Async Web Controller you defined previously
+class WebLogicWeaveCore(WebLogicWeave):
+    """
+    Async implementation of LogicWeaveCore for Browser/Pyodide.
+    Inherits from WebLogicWeave to get the Async WebUSB transport
+    and creates async wrappers for the Core specific functionality.
+    """
+    def __init__(self, *args, **kwargs):
+        # Inject the extended protobuf definitions (core_pb2) 
+        # so self.pb has the voltage/resistance/etc message definitions
+        kwargs['protobuf_module'] = logicweave_core_pb2
+        super().__init__(*args, **kwargs)
+
+    async def read_voltage(self):
+        request = self.pb.ReadVoltageRequest()
+        return await self._send_and_parse(request, "read_voltage_response")
+
+    async def read_resistance(self):
+        request = self.pb.ReadResistanceRequest()
+        return await self._send_and_parse(request, "read_resistance_response")
+    
+    async def read_pd(self):
+        request = self.pb.ReadPDRequest()
+        return await self._send_and_parse(request, "read_pd_response")
+    
+    async def set_psu_output(self, channel, state):
+        request = self.pb.SetPSUOutputRequest(channel=channel, state=state)
+        return await self._send_and_parse(request, "set_psu_output_response")
+    
+    async def read_power_monitor(self):
+        request = self.pb.ReadPowerMonitorRequest()
+        return await self._send_and_parse(request, "read_power_monitor_response")
+    
+    async def configure_psu(self, channel, voltage, current_limit):
+        request = self.pb.ConfigurePSURequest(
+            channel=channel, 
+            voltage=voltage, 
+            current_limit=current_limit
+        )
+        return await self._send_and_parse(request, "configure_psu_response")
+    
+    async def cal_probes(self):
+        request = self.pb.ZeroProbesRequest()
+        return await self._send_and_parse(request, "zero_probes_response")
+
+    async def read_calibration_data(self):
+        request = self.pb.ReadCalibrationDataRequest()
+        return await self._send_and_parse(request, "read_calibration_data_response")
