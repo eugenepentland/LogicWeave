@@ -5,6 +5,7 @@ pub fn init(comptime ProtoDefType: anytype, d: ProtoDefType.Device) type {
     const std = @import("std");
     const microzig = @import("microzig");
     const rp2xxx = microzig.hal;
+    const chip = rp2xxx.compatibility.chip;
 
     // Import your external modules here
     const usb_cfg = @import("usb_config.zig");
@@ -32,6 +33,7 @@ pub fn init(comptime ProtoDefType: anytype, d: ProtoDefType.Device) type {
         var usb_rx_buff: [128]u8 = undefined;
         var usb_tx_buff: [128]u8 = undefined;
         pub var uart_stream_instance: ?rp2xxx.uart.UART = undefined;
+        pub var serial_number: [16]u8 = undefined;
         pub var usb_writer: std.Io.Writer = .fixed(&usb_tx_buff);
         pub const custom_usb_handler_type = ?*const fn (std.mem.Allocator, ProtoDef.RequestMessage) ProtoDef.ResponseMessage.kind_union;
         pub var custom_usb_handler: custom_usb_handler_type = null;
@@ -83,7 +85,10 @@ pub fn init(comptime ProtoDefType: anytype, d: ProtoDefType.Device) type {
         // --- Core 1 Logic (Protocol Handling) ---
 
         fn core1() void {
-            //enable_fpu();
+            if (chip == .RP2350) {
+                enable_fpu();
+            }
+
             // 1. Setup allocator for protocol handler
             var buff: [512]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&buff);
@@ -162,7 +167,22 @@ pub fn init(comptime ProtoDefType: anytype, d: ProtoDefType.Device) type {
             }
         }
 
+        fn load_serial_number() void {
+            const sn = _load_serial_number() catch "ERRLOADINGSERIAL".*;
+            std.mem.copyForwards(u8, &serial_number, &sn);
+        }
+
+        fn _load_serial_number() ![16]u8 {
+            const id_array = switch (chip) {
+                .RP2040 => rp2xxx.flash.id(),
+                .RP2350 => try getUniqueBoardId(),
+            };
+            const hex_serial_number = std.fmt.bytesToHex(&id_array, .upper);
+            return hex_serial_number;
+        }
+
         pub fn setup() void {
+            load_serial_number();
             // Start the 2nd core
             rp2xxx.multicore.launch_core1_with_stack(&core1, &core1_stack);
         }
@@ -182,6 +202,54 @@ pub fn init(comptime ProtoDefType: anytype, d: ProtoDefType.Device) type {
                 handleUsbRx();
                 handleUsbTx();
             }
+        }
+
+        const rom = rp2xxx.rom;
+        const arch = rp2xxx.compatibility.arch;
+
+        const PICO_UNIQUE_BOARD_ID_SIZE_BYTES: u32 = 8;
+        const OTP_ROW_UNIQUE_ID: u32 = 0x1c;
+        const OTP_FLAG_READ: u32 = 0; // 0 for read, 1 for write
+        const SYS_INFO_CHIP_INFO: u32 = 0x0001;
+        const OUTPUT_BUFFER_WORD_SIZE: u32 = 9; // 9 u32 words as in the SDK
+
+        pub const UniqueIdError = error{
+            RomFunctionNotFound,
+            UnexpectedWordCount,
+        };
+
+        pub fn getUniqueBoardId() ![PICO_UNIQUE_BOARD_ID_SIZE_BYTES]u8 {
+            var out: [OUTPUT_BUFFER_WORD_SIZE]u32 = undefined;
+            var retrieved_id: [PICO_UNIQUE_BOARD_ID_SIZE_BYTES]u8 = undefined;
+
+            // 1) Lookup + null-check
+            const any_fn_opt = rom.lookup_and_cache_function(.get_sys_info);
+            if (any_fn_opt == null) return UniqueIdError.RomFunctionNotFound;
+
+            const func: *const rom.signatures.get_sys_info =
+                @ptrCast(@alignCast(any_fn_opt.?));
+
+            // 2) Call the ROM function
+            const rc: i32 = func(&out, OUTPUT_BUFFER_WORD_SIZE, SYS_INFO_CHIP_INFO);
+
+            // 3) Surface real ROM errors (negative)
+            if (rc < 0) {
+                // Turn ROM error codes into your rom.Error set (NotPermitted, InvalidArgument, etc.)
+                return error.RomError;
+            }
+
+            // 4) Expect exactly 4 words for SYS_INFO_CHIP_INFO, same as SDK (assert(rc == 4))
+            if (@as(u32, @intCast(rc)) != 4) return UniqueIdError.UnexpectedWordCount;
+
+            // 5) Byte extraction identical to the SDK:
+            // retrieved_id[i] = out.bytes[PICO_UNIQUE_BOARD_ID_SIZE_BYTES - 1 + 2*4 - i];
+            const out_bytes: []const u8 = std.mem.asBytes(&out);
+            //const base: usize = (2 * 4); // 8
+            for (0..PICO_UNIQUE_BOARD_ID_SIZE_BYTES) |i| {
+                retrieved_id[i] = out_bytes[PICO_UNIQUE_BOARD_ID_SIZE_BYTES - 1 + 2 * 4 - i];
+            }
+
+            return retrieved_id;
         }
     };
 }
