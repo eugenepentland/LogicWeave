@@ -153,23 +153,44 @@ fn process_request(
                 const pin: rp2xxx.gpio.Pin = @enumFromInt(request.gpio_pin);
                 const regs = pin.get_regs();
                 const func_selc = regs.ctrl.read().FUNCSEL;
-                const function: ProtoDef.GpioFunction = switch (func_selc) {
-                    .hstx => .hstx,
-                    .spi => .spi,
-                    .uart, .uart_alt => .uart,
-                    .i2c => .i2c,
-                    .pwm => .pwm,
-                    .pio0, .pio1, .pio2 => .pio,
-                    .gpck => .gpck,
-                    .usb => .usb,
-                    .sio => switch (read_direction(pin)) {
-                        .in => .sio_in,
-                        .out => .sio_out,
+
+                switch (chip) {
+                    .RP2350 => {
+                        const function: ProtoDef.GpioFunction = switch (func_selc) {
+                            .hstx => .hstx,
+                            .spi => .spi,
+                            .uart, .uart_alt => .uart,
+                            .i2c => .i2c,
+                            .pwm => .pwm,
+                            .pio0, .pio1, .pio2 => .pio,
+                            .gpck => .gpck,
+                            .usb => .usb,
+                            .sio => switch (read_direction(pin)) {
+                                .in => .sio_in,
+                                .out => .sio_out,
+                            },
+                            else => .none,
+                        };
+                        return .{ .gpio_read_function_response = .{ .function = function } };
                     },
-                    else => .none,
-                };
-                // Refactored to use explicit response constant
-                return .{ .gpio_read_function_response = .{ .function = function } };
+                    .RP2040 => {
+                        const function: ProtoDef.GpioFunction = switch (func_selc) {
+                            .spi => .spi,
+                            .uart => .uart,
+                            .i2c => .i2c,
+                            .pwm => .pwm,
+                            .pio0, .pio1 => .pio,
+                            .gpck => .gpck,
+                            .usb => .usb,
+                            .sio => switch (read_direction(pin)) {
+                                .in => .sio_in,
+                                .out => .sio_out,
+                            },
+                            else => .none,
+                        };
+                        return .{ .gpio_read_function_response = .{ .function = function } };
+                    },
+                }
             },
             .gpio_read_request => |request| {
                 const pin = getGPIO(request.gpio_pin);

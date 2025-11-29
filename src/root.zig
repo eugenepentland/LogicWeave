@@ -183,6 +183,15 @@ pub fn init(comptime ProtoDefType: anytype, d: ProtoDefType.Device) type {
 
         pub fn setup() void {
             load_serial_number();
+            set_descriptor(&serial_number, 2);
+            const product_name = switch (device) {
+                .rp2040 => "LogicWeave RP2040",
+                .rp2350 => "LogicWeave RP2350",
+                .rp2350b => "LogicWeave RP2350B",
+                .lw_core => "LogicWeave Core",
+                else => "LogicWeave Unknown",
+            };
+            set_descriptor(product_name, 1);
             // Start the 2nd core
             rp2xxx.multicore.launch_core1_with_stack(&core1, &core1_stack);
         }
@@ -202,6 +211,19 @@ pub fn init(comptime ProtoDefType: anytype, d: ProtoDefType.Device) type {
                 handleUsbRx();
                 handleUsbTx();
             }
+        }
+
+        var runtime_serial_buffer: [3][64]u8 = undefined;
+        fn set_descriptor(text: []const u8, index: usize) void {
+            // 1. Safety check: Ensure the buffer fits the expanded string (len * 2)
+            if (text.len * 2 > runtime_serial_buffer[index].len) return;
+
+            var i: usize = 0;
+            while (i < text.len) : (i += 1) {
+                runtime_serial_buffer[index][i * 2] = text[i]; // The Character
+                runtime_serial_buffer[index][(i * 2) + 1] = 0; // The Padding (0 for basic ASCII)
+            }
+            usb_cfg.string_descriptors[index] = runtime_serial_buffer[index][0 .. text.len * 2];
         }
 
         const rom = rp2xxx.rom;

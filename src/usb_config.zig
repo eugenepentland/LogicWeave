@@ -115,13 +115,24 @@ const webusb_platform_capability_descriptor = [_]u8{
     0x05, // bDevCapabilityType = PLATFORM
     0x00, // bReserved
     // PlatformCapabilityUUID
-    WEBUSB_GUID[0], WEBUSB_GUID[1], WEBUSB_GUID[2], WEBUSB_GUID[3],
-    WEBUSB_GUID[4], WEBUSB_GUID[5], WEBUSB_GUID[6], WEBUSB_GUID[7],
-    WEBUSB_GUID[8], WEBUSB_GUID[9], WEBUSB_GUID[10], WEBUSB_GUID[11],
-    WEBUSB_GUID[12], WEBUSB_GUID[13], WEBUSB_GUID[14], WEBUSB_GUID[15],
-    0x00, 0x01, // bcdVersion 1.0
-    WEBUSB_VENDOR_CODE,
-    WEBUSB_LANDING_PAGE_INDEX,
+    WEBUSB_GUID[0],
+    WEBUSB_GUID[1],
+    WEBUSB_GUID[2],
+    WEBUSB_GUID[3],
+    WEBUSB_GUID[4],
+    WEBUSB_GUID[5],
+    WEBUSB_GUID[6],
+    WEBUSB_GUID[7],
+    WEBUSB_GUID[8],
+    WEBUSB_GUID[9],
+    WEBUSB_GUID[10],
+    WEBUSB_GUID[11],
+    WEBUSB_GUID[12],
+    WEBUSB_GUID[13],
+    WEBUSB_GUID[14],
+    WEBUSB_GUID[15],
+    0x00,               0x01, // bcdVersion 1.0
+    WEBUSB_VENDOR_CODE, WEBUSB_LANDING_PAGE_INDEX,
 };
 
 const full_bos_descriptor = [_]u8{
@@ -139,7 +150,7 @@ const usb_config_descriptor =
         usb_config_len,
         0xc0, // attributes
         100, // max power
-    ) ++ 
+    ) ++
     // Interface 1 (Driver)
     id1.serialize() ++
     ed1_in.serialize() ++
@@ -156,10 +167,7 @@ pub var driver: LogicWeaveDriver(usb_dev) = .{};
 pub var web: LogicWeaveDriver(usb_dev) = .{};
 
 // Add both to the driver array
-pub var drivers = [_]usb.types.UsbClassDriver{
-    driver.driver(), 
-    web.driver()
-};
+pub var drivers = [_]usb.types.UsbClassDriver{ driver.driver(), web.driver() };
 
 const WEBUSB_URL = "logicweave.eugenepentland.dev/";
 
@@ -168,6 +176,18 @@ const webusb_url_descriptor = &[_]u8{
     0x03,
     0x01,
 } ++ WEBUSB_URL;
+
+
+pub var string_descriptors = [_][]const u8{
+    &usb.utils.utf8_to_utf16_le("LogicWeave"),      // Index 1
+    &usb.utils.utf8_to_utf16_le("LogicWeave Default"), // Index 2 Product
+    &usb.utils.utf8_to_utf16_le("123456"),          // Index 3 (Default Serial)
+    &usb.utils.utf8_to_utf16_le("Board"),           // Index 4
+    &msft_string_descriptor,
+};
+
+// 2. Your Buffer (from previous step)
+var runtime_serial_buffer: [64]u8 = undefined;
 
 pub var DEVICE_CONFIGURATION: usb.DeviceConfiguration = .{
     .device_descriptor = &.{
@@ -182,7 +202,7 @@ pub var DEVICE_CONFIGURATION: usb.DeviceConfiguration = .{
         .bcd_device = 0x0100,
         .manufacturer_s = 1,
         .product_s = 2,
-        .serial_s = 0,
+        .serial_s = 3,
         .num_configurations = 1,
     },
     .bos_descriptor = &full_bos_descriptor,
@@ -191,12 +211,6 @@ pub var DEVICE_CONFIGURATION: usb.DeviceConfiguration = .{
     .webusb_landing_page_index = WEBUSB_LANDING_PAGE_INDEX,
     .webusb_url_descriptor = webusb_url_descriptor,
     .lang_descriptor = "\x04\x03\x09\x04",
-    .descriptor_strings = &.{
-        &usb.utils.utf8_to_utf16_le("LogicWeave"),
-        &usb.utils.utf8_to_utf16_le("LogicWeave Core"),
-        &usb.utils.utf8_to_utf16_le("123456"),
-        &usb.utils.utf8_to_utf16_le("Board"),
-        &msft_string_descriptor,
-    },
+    .descriptor_strings = &string_descriptors,
     .drivers = &drivers,
 };
