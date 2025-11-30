@@ -46,7 +46,7 @@ jobs:
 
       - name: Setup Zig
         if: steps.check_version.outputs.changed == 'true'
-        uses: mlugg/setup-zig@v1
+        uses: mlugg/setup-zig@v2
         with:
           version: 0.15.1 # Change to specific version (e.g., 0.13.0) if needed
 
