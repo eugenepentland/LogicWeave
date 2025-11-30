@@ -56,26 +56,6 @@ jobs:
           zig build firmware -Dexample-name=lw_rp2350
           zig build firmware -Dexample-name=lw_rp2350b
 
-      # --- NEW STEP ADDED HERE ---
-      - name: Rename Artifacts with Version
-        if: steps.check_version.outputs.changed == 'true'
-        run: |
-          VERSION="${{ steps.check_version.outputs.version }}"
-          cd src/examples/zig-out/firmware
-          
-          for file in *; do
-            # Ensure it is a file and not a directory
-            if [ -f "$file" ]; then
-              # Get the filename without extension (e.g., "lw_core")
-              filename="${file%.*}"
-              # Get the extension (e.g., "uf2" or "elf")
-              extension="${file##*.}"
-              
-              # Rename: lw_core.uf2 -> lw_core-v0.1.0.uf2
-              mv "$file" "${filename}-v${VERSION}.${extension}"
-            fi
-          done
-
       - name: Create Release
         if: steps.check_version.outputs.changed == 'true'
         uses: softprops/action-gh-release@v2
