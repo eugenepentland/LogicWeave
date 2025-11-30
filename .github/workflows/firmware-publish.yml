@@ -3,8 +3,8 @@ name: Build Zig Firmware
 on:
   push:
     paths:
-      - 'build.zig.zon' # Optimization: Only trigger workflow if this file is touched
-      - 'src/**'        # Optional: You might want to trigger on src changes too, but logic below handles version check
+      - 'build.zig.zon'
+      - 'src/**'
   pull_request:
     paths:
       - 'build.zig.zon'
@@ -13,23 +13,18 @@ jobs:
   check-and-build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # <--- IMPORTANT: Changed to 'write' to allow creating releases
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2 # Required to compare against the previous commit
+          fetch-depth: 2
 
       - name: Check if version changed
         id: check_version
         run: |
-          # Extract version from current build.zig.zon
-          # Regex looks for: .version = "X.Y.Z"
           NEW_VER=$(grep -oP '\.version\s*=\s*"\K[^"]+' build.zig.zon || echo "unknown")
-          
-          # Extract version from previous commit (HEAD~1)
-          # We use "|| echo none" to handle cases where the file didn't exist previously
           OLD_VER=$(git show HEAD~1:build.zig.zon 2>/dev/null | grep -oP '\.version\s*=\s*"\K[^"]+' || echo "none")
           
           echo "Previous Version: $OLD_VER"
@@ -48,31 +43,30 @@ jobs:
         if: steps.check_version.outputs.changed == 'true'
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.1 # Change to specific version (e.g., 0.13.0) if needed
+          version: 0.15.1
 
       - name: Build Firmware Variants
         if: steps.check_version.outputs.changed == 'true'
         working-directory: src/examples
         run: |
           echo "Building firmware version ${{ steps.check_version.outputs.version }}..."
-          
-          echo "Building lw_core..."
           zig build firmware -Dexample-name=lw_core
-          
-          echo "Building lw_pico..."
           zig build firmware -Dexample-name=lw_pico
-          
-          echo "Building lw_pico2..."
           zig build firmware -Dexample-name=lw_pico2
-          
-          echo "Building lw_pico2b..."
           zig build firmware -Dexample-name=lw_pico2b
 
-      # Optional: Upload the results so you can download them from GitHub
-      - name: Upload Artifacts
+      # --- CHANGED SECTION BELOW ---
+      
+      - name: Create Release
         if: steps.check_version.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: softprops/action-gh-release@v2
         with:
-          name: firmware-${{ steps.check_version.outputs.version }}
-          # Adjust this path to where your zig build outputs the files (usually zig-out/bin)
-          path: src/examples/zig-out/bin/*
+          # This creates a tag like "v0.1.0" automatically if it doesn't exist
+          tag_name: v${{ steps.check_version.outputs.version }}
+          name: Release v${{ steps.check_version.outputs.version }}
+          draft: false
+          prerelease: false
+          # Attach the files built in the previous step
+          files: src/examples/zig-out/firmware/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
