@@ -22,12 +22,12 @@ const Example = struct {
 // Define Firmware Examples/Targets
 const examples = [_]Example{
     .{
-        .name = "lw_pico2b",
+        .name = "lw_rp2350b",
         .target = .RP2350B,
         .file = "src/logicweave.zig",
     },
     .{
-        .name = "lw_pico2",
+        .name = "lw_rp2350",
         .target = .RP2350,
         .file = "src/logicweave.zig",
     },
@@ -37,7 +37,7 @@ const examples = [_]Example{
         .file = "src/logicweave_core.zig",
     },
     .{
-        .name = "lw_pico",
+        .name = "lw_rp2040",
         .target = .RP2040,
         .file = "src/logicweave.zig",
     },
