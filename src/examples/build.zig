@@ -1,10 +1,8 @@
 const std = @import("std");
 const microzig = @import("microzig");
 const Build = std.Build;
-const Module = Build.Module;
-// Use the definition provided by the user
-const Target = microzig.Target;
 
+// Use the definition provided by the user
 const MicroBuild = microzig.MicroBuild(.{
     .rp2xxx = true,
 });
@@ -12,6 +10,7 @@ const MicroBuild = microzig.MicroBuild(.{
 const PicoTarget = enum {
     RP2040,
     RP2350,
+    RP2350B,
 };
 
 const Example = struct {
@@ -20,8 +19,13 @@ const Example = struct {
     file: []const u8,
 };
 
-// 4) Define Firmware Examples/Targets
+// Define Firmware Examples/Targets
 const examples = [_]Example{
+    .{
+        .name = "lw_pico2b",
+        .target = .RP2350B,
+        .file = "src/logicweave.zig",
+    },
     .{
         .name = "lw_pico2",
         .target = .RP2350,
@@ -29,7 +33,7 @@ const examples = [_]Example{
     },
     .{
         .name = "lw_core",
-        .target = .RP2350,
+        .target = .RP2350B,
         .file = "src/logicweave_core.zig",
     },
     .{
@@ -39,20 +43,17 @@ const examples = [_]Example{
     },
 };
 
-// --- Main Build Function ---
 pub fn build(b: *Build) void {
-    // 1. Define and get the example name from a CLI option
-    const example_name_option = b.option([]const u8, "example-name", "The name of the example to build (e.g., 'logicweave_pico')");
+    // 1. CLI Option: Get example name
+    const example_name_option = b.option([]const u8, "example-name", "The name of the example to build (e.g., 'lw_pico')");
 
-    // Check if the user provided the option
     const example_name = if (example_name_option) |name| name else {
         std.debug.print("Error: Please provide an example name using -Dexample-name=<name>\n", .{});
         std.debug.print("Available examples: {s}\n", .{@as([]const u8, examples[0].name)});
-        // Optionally, you might want to print all available examples or exit gracefully
-        return; // Halt the build process
+        return;
     };
 
-    // 2. Find the example matching the provided name
+    // 2. Find the example
     var found_example: ?Example = null;
     for (examples) |ex| {
         if (std.mem.eql(u8, ex.name, example_name)) {
@@ -63,29 +64,29 @@ pub fn build(b: *Build) void {
 
     const ex = found_example orelse {
         std.debug.print("Error: Example '{s}' not found.\n", .{example_name});
-        return; // Halt the build process
+        return;
     };
 
-    // --- Steps 3 and 4: Dependencies and Building the Single Firmware ---
-
+    // --- Dependencies ---
     const lw_dep = b.dependency("logicweave", .{});
     const mz_dep = b.dependency("microzig", .{});
+    const pb_dep = b.dependency("protobuf", .{});
+    const serial_dep = b.dependency("serial", .{});
 
+    // --- MicroZig Setup ---
     const mb = MicroBuild.init(b, mz_dep) orelse return;
     const lw_mod = lw_dep.module("logicweave");
 
-    const pb_dep = b.dependency("protobuf", .{});
-
-    // Build only the selected example
     const pico_target = switch (ex.target) {
         .RP2040 => mb.ports.rp2xxx.boards.raspberrypi.pico,
-        .RP2350 => mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
+        .RP2350, .RP2350B => mb.ports.rp2xxx.boards.raspberrypi.pico2_arm,
     };
 
+    // --- Create Firmware ---
     const fw = mb.add_firmware(.{
         .name = ex.name,
         .target = pico_target,
-        .board = if (ex.target == .RP2350) .{
+        .board = if (ex.target == .RP2350B) .{
             .name = "rp2350b",
             .root_source_file = b.path("rp2350b.zig"),
         } else null,
@@ -93,88 +94,65 @@ pub fn build(b: *Build) void {
         .root_source_file = b.path(ex.file),
     });
 
+    // --- Protocol Buffers / LogicWeave Modules ---
     const messages_mod = b.createModule(.{ .root_source_file = b.path("../proto_gen/logicweave.pb.zig") });
+    messages_mod.addImport("protobuf", pb_dep.module("protobuf"));
+
     const lw_core_mod = b.createModule(.{ .root_source_file = b.path("../proto_gen/logicweave_core.pb.zig") });
     lw_core_mod.addImport("protobuf", pb_dep.module("protobuf"));
 
-    // Now, just tell the firmware about your logicweave module.
+    // --- Firmware Imports ---
     fw.add_app_import("logicweave", lw_mod, .{ .depend_on_microzig = true });
     fw.add_app_import("protobuf", pb_dep.module("protobuf"), .{});
     fw.add_app_import("lw_core", lw_core_mod, .{});
     fw.add_app_import("lw_standard", messages_mod, .{});
 
-    // Create an install step for the firmware and capture the artifact object.
+    // --- Install Firmware ---
+    // This creates the logic to put the UF2 in zig-out/firmware/
     const fw_install = mb.add_install_firmware(fw, .{});
 
+    // **NEW STEP**: "firmware"
+    // Run `zig build firmware -Dexample-name=...` to build without flashing
+    const firmware_step = b.step("firmware", "Build the firmware only (no flashing)");
+    firmware_step.dependOn(&fw_install.step);
+
+    // Make the default `zig build` also just build the firmware
+    b.getInstallStep().dependOn(&fw_install.step);
+
+    // --- Host Tools (Flash Utility) ---
     const host_target = b.standardTargetOptions(.{});
+    
     const flash_mod = b.addModule("flash", .{
         .root_source_file = b.path("tools/flash.zig"),
         .target = host_target,
     });
 
-    const speed_test_mod = b.addModule("speed", .{
-        .root_source_file = b.path("tools/speed_test.zig"),
-        .target = host_target,
-        .optimize = .ReleaseFast,
-    });
-
-    // 1. Build the 'flash.zig' utility as an executable
-    const speed_test_tool = b.addExecutable(.{
-        .name = "speed",
-        .root_module = speed_test_mod,
-    });
-
-    speed_test_tool.root_module.addImport("protobuf", pb_dep.module("protobuf"));
-    speed_test_tool.root_module.addImport("messages", messages_mod);
-
-    // 1. Build the 'flash.zig' utility as an executable
     const flash_tool = b.addExecutable(.{
         .name = "flash",
         .root_module = flash_mod,
     });
 
+    // Flash Tool Imports
     flash_tool.root_module.addImport("protobuf", pb_dep.module("protobuf"));
-
-    messages_mod.addImport("protobuf", pb_dep.module("protobuf"));
-
     flash_tool.root_module.addImport("messages", messages_mod);
-
-    const serial = b.dependency("serial", .{});
-    flash_tool.root_module.addImport("serial", serial.module("serial"));
-    speed_test_tool.root_module.addImport("serial", serial.module("serial"));
+    flash_tool.root_module.addImport("serial", serial_dep.module("serial"));
 
     b.installArtifact(flash_tool);
-    b.installArtifact(speed_test_tool);
 
-    const speed_test_step = b.step("speed", "Builds the firmware and runs the speed test utility.");
-
-    const speed_command = b.addRunArtifact(speed_test_tool);
-    speed_command.step.dependOn(&speed_test_tool.step); // Depend on the tool's build
-    speed_command.step.dependOn(&fw_install.step); // **NEW:** Depend on the firmware install
-
-    speed_test_step.dependOn(&speed_command.step);
-
-    // 2. Create the 'flash' step
-    const flash_step = b.step("flash", "Builds and flashes the selected firmware to the target device.");
-
-    // 3. Create the 'RunStep' that executes the flash tool
+    // --- Flash Step ---
+    const flash_step = b.step("flash", "Builds and flashes the selected firmware");
     const flash_command = b.addRunArtifact(flash_tool);
 
-    // Set the executable to be the compiled 'flash_tool'
+    // Ensure we build the firmware and the tool before running the flash command
     flash_command.step.dependOn(&flash_tool.step);
     flash_command.step.dependOn(&fw_install.step);
 
-    // Add the firmware output file as an argument to the flash tool.
-    // By passing the `fw_install` artifact directly, Zig's build system
-    // understands the dependency and will substitute the correct path at runtime.
-    // This makes any other explicit `dependOn` for the firmware step redundant.
+    // Arguments for the flash tool
     flash_command.addArg("--file");
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const file_path = std.mem.concat(allocator, u8, &[_][]const u8{ "zig-out/firmware/", ex.name, ".uf2" }) catch "zig-out/firmware/logicweave_pico2_arm.uf2";
+    
+    // Use b.fmt to cleaner string concatenation for the path
+    const file_path = b.fmt("zig-out/firmware/{s}.uf2", .{ex.name});
     flash_command.addArg(file_path);
 
-    // Add the run command to the flash step
     flash_step.dependOn(&flash_command.step);
 }
