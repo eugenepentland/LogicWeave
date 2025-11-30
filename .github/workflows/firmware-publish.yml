@@ -48,7 +48,7 @@ jobs:
         if: steps.check_version.outputs.changed == 'true'
         uses: mlugg/setup-zig@v1
         with:
-          version: master # Change to specific version (e.g., 0.13.0) if needed
+          version: 0.15.1 # Change to specific version (e.g., 0.13.0) if needed
 
       - name: Build Firmware Variants
         if: steps.check_version.outputs.changed == 'true'
