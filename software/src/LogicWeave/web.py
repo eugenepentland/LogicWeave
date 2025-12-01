@@ -14,7 +14,7 @@ from .transports import Transport, VENDOR_ID, PRODUCT_ID, INTERFACE_NUM, PACKET_
 from .exceptions import DeviceConnectionError, DeviceFirmwareError, DeviceResponseError
 # Import the base LogicWeave class to inherit constants/structure if needed, 
 # though we largely redefine behaviors for async.
-from .device import LogicWeave as SyncLogicWeave
+from .logicweave import LogicWeave as SyncLogicWeave
 
 ProtobufModule = Any
 

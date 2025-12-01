@@ -138,7 +138,7 @@ fn process_request(
                 const uart = rp2xxx.uart.instance.num(@intCast(request.instance_num));
 
                 inline for (&.{ tx_pin, rx_pin }) |pin| {
-                    pin.set_function(.uart);
+                    if (@intFromEnum(pin) != 63) pin.set_function(.uart);
                 }
 
                 try uart.apply_runtime(.{
@@ -146,7 +146,6 @@ fn process_request(
                     .clock_config = rp2xxx.clock_config,
                 });
                 Context.uart_stream_instance = uart;
-                // Refactored to use explicit response constant
                 return .{ .stream_uart_response = .{ .data = &.{} } };
             },
             .gpio_read_function_request => |request| {
@@ -195,7 +194,6 @@ fn process_request(
             .gpio_read_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
                 const state = pin.read();
-                // Refactored to use explicit response constant
                 return .{ .gpio_read_response = .{ .state = state != 0 } };
             },
             .adc_read_request => |request| {
@@ -205,13 +203,11 @@ fn process_request(
                 rp2xxx.adc.select_input(input);
 
                 const sample = try rp2xxx.adc.convert_one_shot_blocking(input);
-                // Refactored to use explicit response constant
                 return .{ .adc_read_response = .{ .sample = @intCast(sample) } };
             },
             .gpio_write_request => |request| {
                 const pin = getGPIO(request.gpio_pin);
                 pin.put(@intFromBool(request.state));
-                // Refactored to use explicit response constant
                 return .{ .gpio_write_response = .{ .status = 200 } };
             },
             .pwm_setup_request => |request| {
@@ -225,7 +221,6 @@ fn process_request(
                     pwm_ch.slice().set_clk_div(@intCast(request.clock_div_int), @intCast(request.clock_div_frac));
                 }
                 pwm_ch.slice().enable();
-                // Refactored to use explicit response constant
                 return .{ .pwm_setup_response = .{ .status = 200 } };
             },
             .pwm_set_level_request => |request| {
@@ -233,7 +228,6 @@ fn process_request(
                     return error.InvalidInput;
                 };
                 pwm_ch.set_level(@intCast(request.level));
-                // Refactored to use explicit response constant
                 return .{ .pwm_set_level_response = .{ .status = 200 } };
             },
             .gpio_function_request => |request| {
@@ -252,7 +246,6 @@ fn process_request(
                     },
                     else => {}, // Handle other modes if necessary, or make this an error
                 }
-                // Refactored to use explicit response constant
                 return .{ .gpio_function_response = .{ .status = 200 } };
             },
             .uart_setup_request => |request| {
@@ -261,14 +254,14 @@ fn process_request(
                 const uart = rp2xxx.uart.instance.num(@intCast(request.instance_num));
 
                 inline for (&.{ tx_pin, rx_pin }) |pin| {
-                    pin.set_function(.uart);
+                    if (@intFromEnum(pin) != 63) pin.set_function(.uart);
+                    
                 }
 
                 try uart.apply_runtime(.{
                     .baud_rate = @intCast(request.baud_rate),
                     .clock_config = rp2xxx.clock_config,
                 });
-                // Refactored to use explicit response constant
                 return .{ .uart_setup_response = .{ .status = 200 } };
             },
             .uart_write_request => |request| {
@@ -278,7 +271,6 @@ fn process_request(
                 uart.write_blocking(data, Duration.from_ms(@intCast(request.timeout_ms))) catch {
                     uart.clear_errors();
                 };
-                // Refactored to use explicit response constant
                 return .{ .uart_write_response = .{ .status = 200 } };
             },
             .uart_read_request => |request| {
@@ -289,7 +281,6 @@ fn process_request(
                 uart.read_blocking(buff, Duration.from_ms(@intCast(request.timeout_ms))) catch {
                     uart.clear_errors();
                 };
-                // Refactored to use explicit response constant
                 return .{ .uart_read_response = .{ .data = buff[0..] } };
             },
             .spi_setup_request => |request| {
@@ -301,11 +292,11 @@ fn process_request(
                 spi_instance.reset();
 
                 inline for (&.{ mosi_pin, sclk_pin, miso_pin }) |pin| {
-                    pin.set_function(.spi);
+                    if (@intFromEnum(pin) != 63) pin.set_function(.spi);
+                    
                 }
                 try spi_instance.apply(.{ .clock_config = rp2xxx.clock_config });
 
-                // Refactored to use explicit response constant
                 return .{ .spi_setup_response = .{ .status = 200 } };
             },
             .spi_write_request => |request| {
@@ -322,7 +313,6 @@ fn process_request(
                     spi_instance.write_blocking(u8, request.data);
                 }
 
-                // Refactored to use explicit response constant
                 return .{ .spi_write_response = .{ .status = 200 } };
             },
             .spi_read_request => |request| {
@@ -340,7 +330,6 @@ fn process_request(
                 } else {
                     spi_instance.read_blocking(u8, @truncate(request.data), buff);
                 }
-                // Refactored to use explicit response constant
                 return .{ .spi_read_response = .{ .data = buff } };
             },
             .i2c_setup_request => |request| {
@@ -357,7 +346,6 @@ fn process_request(
                 ic2_instance.apply(.{
                     .clock_config = rp2xxx.clock_config,
                 });
-                // Refactored to use explicit response constant
                 return .{ .i2c_setup_response = .{ .status = 200 } };
             },
             .i2c_read_request => |request| {
@@ -368,7 +356,6 @@ fn process_request(
 
                 i2c_instance.read_blocking(@enumFromInt(device_address), buff, Duration.from_ms(100)) catch {};
 
-                // Refactored to use explicit response constant
                 return .{ .i2c_read_response = .{ .data = buff } };
             },
             .i2c_write_then_read_request => |request| {
@@ -379,14 +366,12 @@ fn process_request(
 
                 i2c_instance.write_then_read_blocking(@enumFromInt(device_address), request.data, buff, Duration.from_ms(100)) catch {};
 
-                // Refactored to use explicit response constant
                 return .{ .i2c_write_then_read_response = .{ .data = buff } };
             },
             .i2c_write_request => |request| {
                 const i2c_instance = rp2xxx.i2c.instance.num(@truncate(request.instance_num));
                 const device_address: u7 = @truncate(request.device_address);
                 try i2c_instance.write_blocking(@enumFromInt(device_address), request.data, null);
-                // Refactored to use explicit response constant
                 return .{ .i2c_write_response = .{ .status = 200 } };
             },
             .gpio_pin_pull_request => |request| {
@@ -397,12 +382,10 @@ fn process_request(
                     .None => pin.set_pull(.disabled),
                     else => return error.InvalidPullState,
                 }
-                // Refactored to use explicit response constant
                 return .{ .gpio_pin_pull_response = .{ .status = 200 } };
             },
             .sleep_ms_request => |request| {
                 rp2xxx.time.sleep_ms(@intCast(request.sleep_ms));
-                // Refactored to use explicit response constant
                 return .{ .sleep_ms_response = .{ .status = 200 } };
             },
             else => {

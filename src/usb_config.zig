@@ -169,7 +169,7 @@ pub var web: LogicWeaveDriver(usb_dev) = .{};
 // Add both to the driver array
 pub var drivers = [_]usb.types.UsbClassDriver{ driver.driver(), web.driver() };
 
-const WEBUSB_URL = "logicweave.eugenepentland.dev/";
+const WEBUSB_URL = "logicweave.dev/";
 
 const webusb_url_descriptor = &[_]u8{
     @as(u8, WEBUSB_URL.len + 3),

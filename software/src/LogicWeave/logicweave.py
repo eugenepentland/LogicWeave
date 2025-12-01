@@ -2,12 +2,31 @@ import struct
 from typing import Optional, Any
 from LogicWeave.exceptions import DeviceFirmwareError, DeviceResponseError, DeviceConnectionError
 import LogicWeave.proto_gen.logicweave_pb2 as lw_pb2
-
-# --- NEW IMPORTS ---
-# We import the Transport logic and constants from the other file
 from .transports import Transport, NativeUsbTransport, VENDOR_ID, PRODUCT_ID, INTERFACE_NUM, PACKET_SIZE
+import enum
 
 ProtobufModule = Any 
+
+class GpioFunction(enum.IntEnum):
+    """
+    Defines the available functions (modes) for a GPIO pin,
+    mapping directly to the integer values in the GpioFunction protobuf enum.
+    """
+    XIP = 0
+    HSTX = 1
+    SPI = 2
+    UART = 3
+    I2C = 4
+    PWM = 5
+    SIO_IN = 6
+    SIO_OUT = 7
+    PIO = 8
+    GPCK = 9
+    USB = 10
+    NONE = 11
+
+# Default GPIO value for optional, unconfigured pins.
+DEFAULT_GPIO_PIN = 63
 
 # --- Base Class for Peripherals ---
 class _BasePeripheral:
@@ -22,7 +41,9 @@ class _BasePeripheral:
 
 # --- Peripheral Classes ---
 class UART(_BasePeripheral):
-    def __init__(self, controller: 'LogicWeave', instance_num: int, tx_pin: int, rx_pin: int, baud_rate: int):
+    def __init__(self, controller: 'LogicWeave', instance_num: int, 
+                 tx_pin: int = DEFAULT_GPIO_PIN, rx_pin: int = DEFAULT_GPIO_PIN, 
+                 baud_rate: int = 115200):
         super().__init__(controller)
         self._instance_num = instance_num
         self.tx_pin = tx_pin
@@ -42,8 +63,8 @@ class UART(_BasePeripheral):
 
     def read(self, byte_count: int, timeout_ms: int = 1000) -> bytes:
         response = self._build_and_execute(self.pb.UartReadRequest, "uart_read_response", 
-                                           instance_num=self._instance_num, 
-                                           byte_count=byte_count, timeout_ms=timeout_ms)
+                                            instance_num=self._instance_num, 
+                                            byte_count=byte_count, timeout_ms=timeout_ms)
         return response.data
 
     def __repr__(self):
@@ -59,7 +80,7 @@ class GPIO(_BasePeripheral):
         self.pull = None
         self.name = name
 
-    def set_function(self, mode: int):
+    def set_function(self, mode: GpioFunction):
         self._build_and_execute(self.pb.GPIOFunctionRequest, "gpio_function_response", 
                                 gpio_pin=self.pin, function=mode, name=self.name)
 
@@ -78,7 +99,7 @@ class GPIO(_BasePeripheral):
         if self._controller.read_pin_function(self.pin) != self.pb.GpioFunction.sio_in:
             self.set_function(self.pb.GpioFunction.sio_in)
         response = self._build_and_execute(self.pb.GPIOReadRequest, "gpio_read_response", 
-                                           gpio_pin=self.pin)
+                                            gpio_pin=self.pin)
         return response.state
 
     def setup_pwm(self, wrap, clock_div_int=0, clock_div_frac=0):
@@ -93,14 +114,18 @@ class GPIO(_BasePeripheral):
 
     def read_adc(self) -> float:
         response = self._build_and_execute(self.pb.ADCReadRequest, "adc_read_response", 
-                                           gpio_pin=self.pin)
+                                            gpio_pin=self.pin)
         return (response.sample / self.MAX_ADC_COUNT) * self.V_REF
 
     def __repr__(self):
         return f"<GPIO pin={self.pin}>"
 
 class I2C(_BasePeripheral):
-    def __init__(self, controller: 'LogicWeave', instance_num: int, sda_pin: int, scl_pin: int, name: Optional[str] = "i2c"):
+    # Pins are required in I2C but made optional here for consistency with the request
+    # to demonstrate the pattern. Real-world I2C often requires both SDA and SCL.
+    def __init__(self, controller: 'LogicWeave', instance_num: int, 
+                 sda_pin: int = DEFAULT_GPIO_PIN, scl_pin: int = DEFAULT_GPIO_PIN, 
+                 name: Optional[str] = "i2c"):
         super().__init__(controller)
         self._instance_num = instance_num
         self.sda_pin = sda_pin
@@ -120,23 +145,26 @@ class I2C(_BasePeripheral):
 
     def write_then_read(self, device_address: int, data: bytes, byte_count: int) -> bytes:
         response = self._build_and_execute(self.pb.I2CWriteThenReadRequest, "i2c_write_then_read_response", 
-                                           instance_num=self._instance_num, 
-                                           device_address=device_address, data=data, 
-                                           byte_count=byte_count)
+                                            instance_num=self._instance_num, 
+                                            device_address=device_address, data=data, 
+                                            byte_count=byte_count)
         return response.data
 
     def read(self, device_address: int, byte_count: int) -> bytes:
         response = self._build_and_execute(self.pb.I2CReadRequest, "i2c_read_response", 
-                                           instance_num=self._instance_num, 
-                                           device_address=device_address, 
-                                           byte_count=byte_count)
+                                            instance_num=self._instance_num, 
+                                            device_address=device_address, 
+                                            byte_count=byte_count)
         return response.data
 
     def __repr__(self):
         return f"<I2C instance={self._instance_num} sda={self.sda_pin} scl={self.scl_pin}>"
 
 class SPI(_BasePeripheral):
-    def __init__(self, controller: 'LogicWeave', instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int, baud_rate: int, name: Optional[str] = "spi", default_cs_pin: Optional[int] = None):
+    def __init__(self, controller: 'LogicWeave', instance_num: int, 
+                 sclk_pin: int, mosi_pin: int, 
+                 miso_pin: int = DEFAULT_GPIO_PIN, baud_rate: int = 1e6, 
+                 name: Optional[str] = "spi", default_cs_pin: Optional[int] = None):
         super().__init__(controller)
         self._instance_num = instance_num
         self.sclk_pin = sclk_pin
@@ -166,10 +194,10 @@ class SPI(_BasePeripheral):
 
     def read(self, byte_count: int, cs_pin: Optional[int] = None, data_to_send: int = 0) -> bytes:
         response = self._build_and_execute(self.pb.SPIReadRequest, "spi_read_response", 
-                                           instance_num=self._instance_num, 
-                                           data=data_to_send, 
-                                           cs_pin=self._get_cs_pin(cs_pin), 
-                                           byte_count=byte_count)
+                                            instance_num=self._instance_num, 
+                                            data=data_to_send, 
+                                            cs_pin=self._get_cs_pin(cs_pin), 
+                                            byte_count=byte_count)
         return response.data
 
     def __repr__(self):
@@ -181,9 +209,9 @@ class SPI(_BasePeripheral):
 # --- Main Controller Class ---
 class LogicWeave:
     def __init__(self, transport: Transport = NativeUsbTransport, protobuf_module: ProtobufModule = lw_pb2, 
-            vendor_id: int = VENDOR_ID, product_id: int = PRODUCT_ID, 
-            interface: int = INTERFACE_NUM, packet_size: int = PACKET_SIZE, 
-            timeout_ms: int = 5000, **kwargs):
+                 vendor_id: int = VENDOR_ID, product_id: int = PRODUCT_ID, 
+                 interface: int = INTERFACE_NUM, packet_size: int = PACKET_SIZE, 
+                 timeout_ms: int = 5000, **kwargs):
         
         self.vendor_id = vendor_id
         self.product_id = product_id
@@ -195,27 +223,27 @@ class LogicWeave:
         # Setup Transport
         if isinstance(transport, type):
             self.transport = transport(vendor_id=self.vendor_id, 
-                                       product_id=self.product_id, 
-                                       interface=self.interface)
+                                     product_id=self.product_id, 
+                                     interface=self.interface)
         else:
             self.transport = transport
 
         try:
             self.transport.open()
         except Exception as e:
-             raise DeviceConnectionError(f"Connection failed: {e}")
+            raise DeviceConnectionError(f"Connection failed: {e}")
 
     # --- Peripheral Factory Methods ---
-    def uart(self, instance_num: int, tx_pin: int, rx_pin: int, baud_rate: int = 115200, name: str = "uart") -> 'UART':
+    def uart(self, instance_num: int, tx_pin: int = DEFAULT_GPIO_PIN, rx_pin: int = DEFAULT_GPIO_PIN, baud_rate: int = 115200, name: str = "uart") -> 'UART':
         return UART(self, instance_num, tx_pin, rx_pin, baud_rate)
 
     def gpio(self, pin: int, name: str = "gpio") -> GPIO:
         return GPIO(self, pin, name)
 
-    def i2c(self, instance_num: int, sda_pin: int, scl_pin: int, name: str = "i2c") -> I2C:
+    def i2c(self, instance_num: int, sda_pin: int = DEFAULT_GPIO_PIN, scl_pin: int = DEFAULT_GPIO_PIN, name: str = "i2c") -> I2C:
         return I2C(self, instance_num, sda_pin, scl_pin, name)
 
-    def spi(self, instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int, baud_rate: int = 1000000, default_cs_pin: Optional[int] = None, name: str = "spi") -> SPI:
+    def spi(self, instance_num: int, sclk_pin: int, mosi_pin: int, miso_pin: int = DEFAULT_GPIO_PIN, baud_rate: int = 1000000, default_cs_pin: Optional[int] = None, name: str = "spi") -> SPI:
         return SPI(self, instance_num, sclk_pin, mosi_pin, miso_pin, baud_rate, name, default_cs_pin)
 
     def _execute_transaction(self, specific_message_payload):
@@ -267,9 +295,9 @@ class LogicWeave:
         response_app_msg = self._execute_transaction(request_payload)
         response_field = response_app_msg.WhichOneof("kind")
         if response_field == "error_response":
-             raise DeviceFirmwareError(f"{response_app_msg.error_response.message}")
+            raise DeviceFirmwareError(f"{response_app_msg.error_response.message}")
         if response_field != expected_response_field:
-             raise DeviceResponseError(expected=expected_response_field, received=response_field)
+            raise DeviceResponseError(expected=expected_response_field, received=response_field)
         return getattr(response_app_msg, response_field)
 
     def close(self):

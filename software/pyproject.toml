@@ -1,13 +1,13 @@
 [project]
 name = "logic-weave"
-version = "0.4.5"
-description = "A Python client library for communicating with the firmware device over serial."
+version = "0.4.6"
+description = "A Python client library for controlling an rp2040/rp2350 through USB."
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "MIT License" } # Or { file = "LICENSE" } if you'll have a separate LICENSE file
+license = { text = "MIT License" }
 keywords = ["firmware", "serial", "protobuf", "device communication", "embedded"]
 authors = [
-  { name = "Eugene Pentland", email = "eugenepentland@gmail.com" }, # <--- REPLACE WITH YOUR INFO
+  { name = "Eugene Pentland", email = "eugenepentland@gmail.com" },
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
