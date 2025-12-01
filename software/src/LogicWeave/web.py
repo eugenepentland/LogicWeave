@@ -1,5 +1,7 @@
+# web.py
 import struct
 import asyncio
+import logging  # <--- Added logging import
 from typing import Optional, Any
 import sys
 
@@ -80,19 +82,7 @@ class AsyncUART(_AsyncBasePeripheral):
         self.tx_pin = tx_pin
         self.rx_pin = rx_pin
         self.baud_rate = baud_rate
-        # We cannot await in __init__, so setup happens lazily or user must ensure device is ready.
-        # However, typically the factory method in WebLogicWeave calls a setup method.
-        # For simplicity, we assume the user might call a setup, or we fire-and-forget (dangerous),
-        # or we accept that the first command might fail if not set up.
-        # BETTER PATTERN: The factory method in WebLogicWeave should be async or return a task,
-        # but to keep API syntax similar, we often add an explicit async setup method 
-        # or just call it on the first write. 
-        # For this implementation, we will add an explicit async `init()` method or 
-        # just let the user run commands. 
-        
-        # NOTE: In the sync version, you called `_setup()` in `__init__`. 
-        # You cannot do that in Async. 
-        # We will create a task to do it immediately, but it's non-blocking.
+        # Async setup task
         asyncio.create_task(self._setup())
 
     async def _setup(self):
@@ -264,7 +254,11 @@ class WebLogicWeave(SyncLogicWeave):
     def __init__(self, transport=None, protobuf_module=lw_pb2, 
                  vendor_id=VENDOR_ID, product_id=PRODUCT_ID, 
                  interface=INTERFACE_NUM, packet_size=PACKET_SIZE, 
-                 timeout_ms=5000, **kwargs):
+                 timeout_ms=5000, 
+                 # New Logging Arguments
+                 log_file: Optional[str] = None, 
+                 log_console: bool = True,
+                 **kwargs):
         
         self.vendor_id = vendor_id
         self.product_id = product_id
@@ -273,12 +267,47 @@ class WebLogicWeave(SyncLogicWeave):
         self.timeout_ms = timeout_ms
         self.pb = protobuf_module
 
+        # --- Logging Setup (Ported from LogicWeave) ---
+        # We create a logger unique to this instance to prevent collisions
+        self.logger = logging.getLogger(f"LogicWeave-{id(self)}")
+        self.logger.setLevel(logging.INFO)
+        self.logger.handlers = [] # Reset handlers
+
+        formatter = logging.Formatter('%(asctime)s | %(message)s', datefmt='%H:%M:%S')
+
+        if log_console:
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(formatter)
+            self.logger.addHandler(console_handler)
+
+        if log_file:
+            # Note: In Pyodide, this writes to the in-memory Emscripten filesystem
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+
         # Force WebUSBTransport if not provided
         if transport is None:
             self.transport = WebUSBTransport(vendor_id=self.vendor_id, 
                                              product_id=self.product_id)
         else:
             self.transport = transport
+
+    # --- New Logging Method (Ported from LogicWeave) ---
+    def log(self, key: str, value: Any, level: int = logging.INFO):
+        """
+        Unified logging method.
+        1. Updates Web GUI if 'update_gui' is available.
+        2. Logs to console/file via standard logging, preserving structure.
+        """
+        try:
+            # Check for global update_gui function (common in Pyodide/GUI implementations)
+            update_gui(key, value)
+        except:
+            pass
+        
+        # Log to Python Logger (Console/File)
+        self.logger.log(level, f"{key}: {value}", extra={'output_key': key, 'output_value': value})
 
     # --- Async Context Manager ---
     async def __aenter__(self):
