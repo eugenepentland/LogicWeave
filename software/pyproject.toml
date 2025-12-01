@@ -1,6 +1,6 @@
 [project]
 name = "logic-weave"
-version = "0.4.7"
+version = "0.4.8"
 description = "A Python client library for controlling an rp2040/rp2350 through USB."
 readme = "README.md"
 requires-python = ">=3.8"

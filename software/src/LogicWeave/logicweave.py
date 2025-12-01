@@ -265,11 +265,10 @@ class LogicWeave:
         Using 'extra' allows structured loggers (like JSON formatters) to 
         access the raw 'output_key' and 'output_value' without parsing the message string.
         """
-        # A. Update Web GUI
-        # We check builtins because the browser runner injects set_output there
-        gui_func = getattr(builtins, "update_gui", None)
-        if callable(gui_func):
-            gui_func(key, value)
+        try:
+            update_gui(key, value)
+        except:
+            pass
         
         # B. Log to Python Logger (Console/File)
         # We pass key/value in 'extra' for better integration with logging backends
