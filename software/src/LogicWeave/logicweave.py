@@ -1,9 +1,12 @@
 import struct
+import logging
+import sys
+import builtins
+import enum
 from typing import Optional, Any
 from LogicWeave.exceptions import DeviceFirmwareError, DeviceResponseError, DeviceConnectionError
 import LogicWeave.proto_gen.logicweave_pb2 as lw_pb2
 from .transports import Transport, NativeUsbTransport, VENDOR_ID, PRODUCT_ID, INTERFACE_NUM, PACKET_SIZE
-import enum
 
 ProtobufModule = Any 
 
@@ -63,8 +66,8 @@ class UART(_BasePeripheral):
 
     def read(self, byte_count: int, timeout_ms: int = 1000) -> bytes:
         response = self._build_and_execute(self.pb.UartReadRequest, "uart_read_response", 
-                                            instance_num=self._instance_num, 
-                                            byte_count=byte_count, timeout_ms=timeout_ms)
+                                           instance_num=self._instance_num, 
+                                           byte_count=byte_count, timeout_ms=timeout_ms)
         return response.data
 
     def __repr__(self):
@@ -99,7 +102,7 @@ class GPIO(_BasePeripheral):
         if self._controller.read_pin_function(self.pin) != self.pb.GpioFunction.sio_in:
             self.set_function(self.pb.GpioFunction.sio_in)
         response = self._build_and_execute(self.pb.GPIOReadRequest, "gpio_read_response", 
-                                            gpio_pin=self.pin)
+                                           gpio_pin=self.pin)
         return response.state
 
     def setup_pwm(self, wrap, clock_div_int=0, clock_div_frac=0):
@@ -113,16 +116,13 @@ class GPIO(_BasePeripheral):
                                 gpio_pin=self.pin, level=level)
 
     def read_adc(self) -> float:
-        response = self._build_and_execute(self.pb.ADCReadRequest, "adc_read_response", 
-                                            gpio_pin=self.pin)
+        response = self._build_and_execute(self.pb.ADCReadRequest, "adc_read_response", gpio_pin=self.pin)
         return (response.sample / self.MAX_ADC_COUNT) * self.V_REF
 
     def __repr__(self):
         return f"<GPIO pin={self.pin}>"
 
 class I2C(_BasePeripheral):
-    # Pins are required in I2C but made optional here for consistency with the request
-    # to demonstrate the pattern. Real-world I2C often requires both SDA and SCL.
     def __init__(self, controller: 'LogicWeave', instance_num: int, 
                  sda_pin: int = DEFAULT_GPIO_PIN, scl_pin: int = DEFAULT_GPIO_PIN, 
                  name: Optional[str] = "i2c"):
@@ -211,7 +211,11 @@ class LogicWeave:
     def __init__(self, transport: Transport = NativeUsbTransport, protobuf_module: ProtobufModule = lw_pb2, 
                  vendor_id: int = VENDOR_ID, product_id: int = PRODUCT_ID, 
                  interface: int = INTERFACE_NUM, packet_size: int = PACKET_SIZE, 
-                 timeout_ms: int = 5000, **kwargs):
+                 timeout_ms: int = 5000, 
+                 # New Logging Arguments
+                 log_file: Optional[str] = None, 
+                 log_console: bool = True,
+                 **kwargs):
         
         self.vendor_id = vendor_id
         self.product_id = product_id
@@ -219,6 +223,24 @@ class LogicWeave:
         self.packet_size = packet_size
         self.timeout_ms = timeout_ms
         self.pb = protobuf_module
+
+        # --- Logging Setup ---
+        # We create a logger unique to this instance to prevent collisions
+        self.logger = logging.getLogger(f"LogicWeave-{id(self)}")
+        self.logger.setLevel(logging.INFO)
+        self.logger.handlers = [] # Reset handlers
+
+        formatter = logging.Formatter('%(asctime)s | %(message)s', datefmt='%H:%M:%S')
+
+        if log_console:
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(formatter)
+            self.logger.addHandler(console_handler)
+
+        if log_file:
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
 
         # Setup Transport
         if isinstance(transport, type):
@@ -232,6 +254,26 @@ class LogicWeave:
             self.transport.open()
         except Exception as e:
             raise DeviceConnectionError(f"Connection failed: {e}")
+
+    # --- New Logging Method ---
+    def log(self, key: str, value: Any, level: int = logging.INFO):
+        """
+        Unified logging method.
+        1. Updates Web GUI if 'update_gui' is available (injected in browser).
+        2. Logs to console/file via standard logging, preserving structure.
+        
+        Using 'extra' allows structured loggers (like JSON formatters) to 
+        access the raw 'output_key' and 'output_value' without parsing the message string.
+        """
+        # A. Update Web GUI
+        # We check builtins because the browser runner injects set_output there
+        gui_func = getattr(builtins, "update_gui", None)
+        if callable(gui_func):
+            gui_func(key, value)
+        
+        # B. Log to Python Logger (Console/File)
+        # We pass key/value in 'extra' for better integration with logging backends
+        self.logger.log(level, f"{key}: {value}", extra={'output_key': key, 'output_value': value})
 
     # --- Peripheral Factory Methods ---
     def uart(self, instance_num: int, tx_pin: int = DEFAULT_GPIO_PIN, rx_pin: int = DEFAULT_GPIO_PIN, baud_rate: int = 115200, name: str = "uart") -> 'UART':
