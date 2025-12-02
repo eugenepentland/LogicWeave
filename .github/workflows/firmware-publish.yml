@@ -5,6 +5,7 @@ on:
     paths:
       - 'build.zig.zon'
       - 'src/**'
+      - '.github/workflows/firmware-publish.yml'
   pull_request:
     paths:
       - 'build.zig.zon'
