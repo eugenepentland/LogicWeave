@@ -19,35 +19,42 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
-          submodules: recursive # <--- ADD THIS LINE
+          fetch-depth: 1 # We don't need history anymore, just current file
+          submodules: true
 
-      - name: Check if version changed
+      - name: Check if version needs release
         id: check_version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          NEW_VER=$(grep -oP '\.version\s*=\s*"\K[^"]+' build.zig.zon || echo "unknown")
-          OLD_VER=$(git show HEAD~1:build.zig.zon 2>/dev/null | grep -oP '\.version\s*=\s*"\K[^"]+' || echo "none")
+          # 1. Extract the current version from build.zig.zon
+          CURRENT_VER=$(grep -oP '\.version\s*=\s*"\K[^"]+' build.zig.zon || echo "unknown")
           
-          echo "Previous Version: $OLD_VER"
-          echo "Current Version:  $NEW_VER"
+          echo "Detected Version in file: $CURRENT_VER"
           
-          if [ "$NEW_VER" != "$OLD_VER" ] && [ "$NEW_VER" != "unknown" ]; then
-            echo "Version bumped detected."
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "version=$NEW_VER" >> $GITHUB_OUTPUT
+          if [ "$CURRENT_VER" == "unknown" ]; then
+             echo "Could not detect version."
+             exit 1
+          fi
+
+          # 2. Check GitHub API to see if this release tag already exists
+          if gh release view "v$CURRENT_VER" > /dev/null 2>&1; then
+            echo "Release v$CURRENT_VER already exists. Skipping build."
+            echo "should_build=false" >> $GITHUB_OUTPUT
           else
-            echo "Version unchanged. Skipping build."
-            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "Release v$CURRENT_VER does NOT exist. Starting build..."
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "version=$CURRENT_VER" >> $GITHUB_OUTPUT
           fi
 
       - name: Setup Zig
-        if: steps.check_version.outputs.changed == 'true'
+        if: steps.check_version.outputs.should_build == 'true'
         uses: mlugg/setup-zig@v2
         with:
           version: 0.15.1
 
       - name: Build Firmware Variants
-        if: steps.check_version.outputs.changed == 'true'
+        if: steps.check_version.outputs.should_build == 'true'
         working-directory: src/examples
         run: |
           echo "Building firmware version ${{ steps.check_version.outputs.version }}..."
@@ -57,14 +64,13 @@ jobs:
           zig build firmware -Dexample-name=lw_rp2350b
 
       - name: Create Release
-        if: steps.check_version.outputs.changed == 'true'
+        if: steps.check_version.outputs.should_build == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.check_version.outputs.version }}
           name: Release v${{ steps.check_version.outputs.version }}
           draft: false
           prerelease: false
-          # The glob below will now pick up the renamed files automatically
           files: src/examples/zig-out/firmware/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
