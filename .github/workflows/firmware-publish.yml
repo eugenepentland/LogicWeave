@@ -19,8 +19,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1 # We don't need history anymore, just current file
-          submodules: true
+          fetch-depth: 0
+          submodules: false
+
+      - name: Manually checkout submodules (Non-Recursive)
+        run: |
+          # Manually init ONLY the top-level submodules
+          git submodule update --init --force
 
       - name: Check if version needs release
         id: check_version
