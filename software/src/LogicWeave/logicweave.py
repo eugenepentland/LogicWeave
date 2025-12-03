@@ -6,7 +6,7 @@ import enum
 from typing import Optional, Any
 from LogicWeave.exceptions import DeviceFirmwareError, DeviceResponseError, DeviceConnectionError
 import LogicWeave.proto_gen.logicweave_pb2 as lw_pb2
-from .transports import Transport, NativeUsbTransport, VENDOR_ID, PRODUCT_ID, INTERFACE_NUM, PACKET_SIZE
+from .transports import Transport, NativeUsbTransport, PyodideTransport, VENDOR_ID, PRODUCT_ID, INTERFACE_NUM, PACKET_SIZE
 
 ProtobufModule = Any 
 
@@ -208,7 +208,7 @@ class SPI(_BasePeripheral):
 
 # --- Main Controller Class ---
 class LogicWeave:
-    def __init__(self, transport: Transport = NativeUsbTransport, protobuf_module: ProtobufModule = lw_pb2, 
+    def __init__(self, transport: Transport = None, protobuf_module: ProtobufModule = lw_pb2, 
                  vendor_id: int = VENDOR_ID, product_id: int = PRODUCT_ID, 
                  interface: int = INTERFACE_NUM, packet_size: int = PACKET_SIZE, 
                  timeout_ms: int = 5000, 
@@ -241,6 +241,12 @@ class LogicWeave:
             file_handler = logging.FileHandler(log_file)
             file_handler.setFormatter(formatter)
             self.logger.addHandler(file_handler)
+
+        if transport is None:
+            if sys.platform == 'emscripten': # 'emscripten' means we are in Pyodide
+                transport = PyodideTransport
+            else:
+                transport = NativeUsbTransport
 
         # Setup Transport
         if isinstance(transport, type):

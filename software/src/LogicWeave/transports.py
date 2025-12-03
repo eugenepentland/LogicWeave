@@ -88,15 +88,82 @@ class NativeUsbTransport:
 
 class PyodideTransport:
     """
-    Placeholder for WebUSB transport.
-    
-    When running in the Web IDE, this class is monkey-patched 
-    at runtime to support async/await execution.
+    WebUSB Transport for running inside the Browser via Pyodide.
+    Uses pyodide.ffi.run_sync to bridge async JS calls to sync Python.
     """
-    def __init__(self, **kwargs):
-        raise NotImplementedError("This class only works in the LogicWeave Web IDE.")
+    def __init__(self, vendor_id=VENDOR_ID, product_id=PRODUCT_ID, interface=INTERFACE_NUM):
+        self.vendor_id = vendor_id
+        self.product_id = product_id
+        self.interface = interface
+        self.js_dev = None
 
-    def open(self): pass
-    def close(self): pass
-    def write(self, data): pass
-    def read(self, length, timeout): pass
+    def open(self):
+        import js
+        from pyodide.ffi import run_sync
+        
+        # 1. Check if worker.js set the device globally
+        if not hasattr(js, 'py_device') or not js.py_device:
+            raise Exception("No authorized USB device found in browser context.")
+        
+        # 2. Define the async JS steps
+        async def _async_open():
+            dev = js.py_device
+            await dev.open()
+            await dev.selectConfiguration(1)
+            await dev.claimInterface(self.interface)
+            return dev
+
+        # 3. Execute synchronously
+        try:
+            self.js_dev = run_sync(_async_open())
+        except Exception as e:
+            raise Exception(f"Failed to open WebUSB device: {e}")
+
+    def write(self, data: bytes):
+        if not self.js_dev:
+            raise Exception("Device not open")
+        
+        import js
+        from pyodide.ffi import run_sync
+
+        # Convert Python bytes to JS Uint8Array
+        js_data = js.Uint8Array.new(data)
+
+        async def _async_write():
+            # WebUSB transferOut(endpointNumber, data)
+            # EP_OUT_ADDR is 0x05, which is valid for transferOut
+            await self.js_dev.transferOut(EP_OUT_ADDR, js_data)
+
+        run_sync(_async_write())
+
+    def read(self, length: int, timeout_ms: int) -> bytes:
+        if not self.js_dev:
+            raise Exception("Device not open")
+
+        from pyodide.ffi import run_sync
+
+        async def _async_read():
+            # EP_IN_ADDR is 0x84. WebUSB expects the Endpoint Number (4).
+            # We strip the direction bit (0x80) just in case, though some browsers handle 0x84.
+            endpoint_num = EP_IN_ADDR & 0x0F 
+            
+            result = await self.js_dev.transferIn(endpoint_num, length)
+            # result.data is a DataView. buffer.to_bytes() converts it back to Python.
+            return result.data.buffer.to_bytes()
+
+        return run_sync(_async_read())
+
+    def close(self):
+        if not self.js_dev:
+            return
+
+        from pyodide.ffi import run_sync
+
+        async def _async_close():
+            try:
+                await self.js_dev.close()
+            except:
+                pass 
+
+        run_sync(_async_close())
+        self.js_dev = None
