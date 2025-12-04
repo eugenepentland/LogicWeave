@@ -1,3 +1,5 @@
+# DEPRICIATED, USING WEBWORKERS INSTEAD
+
 # web.py
 import struct
 import asyncio
