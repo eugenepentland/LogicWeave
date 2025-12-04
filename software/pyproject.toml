@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "protobuf>=6.0.0",
+    "protobuf>=6.33.1",
 ]
 
 [project.urls]
