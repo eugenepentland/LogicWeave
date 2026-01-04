@@ -37,6 +37,7 @@ message RequestMessage {
     ZeroProbesRequest zero_probes_request = 77;
     ReadCalibrationDataRequest read_calibration_data_request = 78;
     StreamUartRequest stream_uart_request = 79;
+    ProbeGpioRequest probe_gpio_request = 82;
   }
 };
 
@@ -76,7 +77,16 @@ message ResponseMessage {
       ZeroProbesResponse zero_probes_response = 79;
       ReadCalibrationDataResponse read_calibration_data_response = 80;
       StreamUartResponse stream_uart_response = 81;
+      ProbeGpioResponse probe_gpio_response = 82;
     }
+}
+
+message ProbeGpioRequest {
+  uint32 gpio_pin = 1;
+}
+
+message ProbeGpioResponse {
+  float voltage = 1;
 }
 
 message StreamUartRequest {

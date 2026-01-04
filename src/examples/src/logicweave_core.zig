@@ -37,10 +37,66 @@ const target_sample: u12 = 2048;
 // Pin Definitions
 // --------------------------------------------------------------------------
 
+fn set_debugging_switches(gpio_num: u6) ?f32 {
+    // Set all OE pins high, then set the selected one low
+    pins.OE1.put(1);
+    pins.OE2.put(1);
+    pins.OE3.put(1);
+
+    const oe = switch (gpio_num) {
+        32...39 => pins.OE2,
+        12...19 => pins.OE1,
+        40...44 => pins.OE3,
+        else => return null,
+    };
+    oe.put(0);
+
+    // Set the A0,A1,A2 states
+    const state: u3 = switch (gpio_num) {
+        41, 15, 35 => 7,
+        40, 14, 34 => 6,
+        13, 33 => 5,
+        12, 32 => 4,
+        42, 16, 36 => 3,
+        43, 17, 37 => 2,
+        18, 38 => 1,
+        19, 39 => 0,
+        else => 0,
+    };
+
+    pins.A0.put(@truncate(state));
+    pins.A1.put(@truncate(state >> 1));
+    pins.A2.put(@truncate(state >> 2));
+
+    // Sleep to wait for the switches to settle
+    rp2xxx.time.sleep_ms(2);
+
+    // Read the ADC state
+    rp2xxx.adc.select_input(pins.debugging_adc);
+    const sample = get_sample_average(100) catch 1;
+    const voltage: f32 = (@as(f32, @floatFromInt(sample)) / 4095.0) * 3.3;
+
+    // Set all OE pins back to high
+    pins.OE1.put(1);
+    pins.OE2.put(1);
+    pins.OE3.put(1);
+
+    return voltage;
+}
+
 const pins = struct {
     // I2C
     const sda = gpio.num(0);
     const scl = gpio.num(1);
+
+    // Debugging switch controls
+    const A0 = gpio.num(7);
+    const A1 = gpio.num(8);
+    const A2 = gpio.num(9);
+    const OE1 = gpio.num(10);
+    const OE2 = gpio.num(11);
+    const OE3 = gpio.num(23);
+    const debugging_adc: rp2xxx.adc.Input = .ain4;
 
     // USB PD
     const pd_alert = gpio.num(2);
@@ -252,6 +308,15 @@ fn usb_handler(_: std.mem.Allocator, message: messages.RequestMessage) messages.
                 const result = read_resistancemeter(true, undefined);
                 const selected_resistor_value = get_resistor_value(result.bank);
                 return .{ .read_resistance_response = .{ .resistance = result.resistance, .selected_resistor_value = selected_resistor_value } };
+            },
+            .probe_gpio_request => |request| {
+                const gpio_num: u6 = @intCast(request.gpio_pin);
+                const voltage_opt = set_debugging_switches(gpio_num);
+                if (voltage_opt) |voltage| {
+                    return .{ .probe_gpio_response = .{ .voltage = voltage } };
+                } else {
+                    return .{ .error_response = .{ .message = "invalid GPIO" } };
+                }
             },
             .read_pd_request => {
                 const req_v = usb_pd.readRequestedVoltageMv() catch 0;
