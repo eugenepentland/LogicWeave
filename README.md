@@ -16,19 +16,32 @@ LogicWeave is written in Zig and built on top of the MicroZig hardware abstracti
 
 ## Getting Started
 
+### Installing Zig 
+
+Instructions to install Zig on your machine can be found at the [Zig project](https://ziglang.org/learn/getting-started/).
+
 ### Flashing the Firmware
-Build and flash LogicWeave firmware using Zig:
+Build and flash LogicWeave firmware using Zig for the RP2350:
 ```bash
+# From the repo root
+git submodule update --init --recursive
 cd src/examples
-zig build
+zig init
+zig build -Dexample-name=lw_rp2350b
+cd zig-out/firmware
 ````
 
-Then copy the generated `.uf2` or `.bin` file to your board’s USB drive.
+If building LogicWeave firmward for the RP2040, replace the `-Dexample-name` flag with `-Dexample-name=lw_rp2040`.
+
+You can now copy the generated `.uf2` or `.bin` file to your board’s USB drive.
 
 ### Installing the Python Library
 
 ```bash
-pip install logicweave
+# From the repo root
+cd software
+pip install pyusb
+pip install .
 ```
 
 ### Connecting from Python
@@ -43,6 +56,10 @@ with LogicWeave() as lw:
     info = lw.read_firmware_info()
     print(f"Firmware Version: {info.version}")
 ```
+
+***Important note***: On Linux, you may encounter an issue with pyusb, and not having the appropriate permissions to access devices over USB from Python.
+
+If this happens, please refer to this [StackOverflow post](https://stackoverflow.com/questions/53125118/why-is-python-pyusb-usb-core-access-denied-due-to-permissions-and-why-wont-the). The top answer has a helpful guide on how to fix this.
 
 ## Examples
 
